@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: harvestai-db
+    environment:
+      POSTGRES_USER: harvestai
+      POSTGRES_PASSWORD: harvestai_dev
+      POSTGRES_DB: harvestai
+    ports:
+      - "5432:5432"
+    volumes:
+      - harvestai_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harvestai -d harvestai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: harvestai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - harvestai_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  harvestai_db_data:
+  harvestai_redis_data:

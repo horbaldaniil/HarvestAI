@@ -1,0 +1,98 @@
+# ─── Python ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.cache
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# uv
+.uv/
+
+# Poetry
+poetry.lock.bak
+
+# ─── Node ─────────────────────────────────────────────
+node_modules/
+dist/
+.pnp/
+.pnp.js
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.next/
+out/
+*.tsbuildinfo
+
+# ─── ML / Data ────────────────────────────────────────
+backend/models/*.joblib
+backend/models/*.pt
+backend/models/*.onnx
+backend/data/raw/*
+backend/data/processed/*
+!backend/data/raw/.gitkeep
+!backend/data/processed/.gitkeep
+!backend/models/.gitkeep
+*.pkl
+*.h5
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─── Secrets & env ────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── IDE / OS ─────────────────────────────────────────
+.vscode/
+!.vscode/settings.json.example
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Build artefacts ──────────────────────────────────
+*.log
+*.tmp
+*.pdf
+!backend/app/templates/**/*.pdf
+backend/var/
+frontend/coverage/
+
+# ─── Docker ───────────────────────────────────────────
+*.tar
+*.tar.gz
