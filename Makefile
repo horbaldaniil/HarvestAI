@@ -55,7 +55,7 @@ be-revision:
 	cd backend && uv run alembic revision --autogenerate -m "$(NAME)"
 
 worker:
-	cd backend && uv run rq worker default high low
+	cd backend && uv run python -m app.workers.rq_worker default high low
 
 # ─── Frontend ──────────────────────────────────────────────────
 fe-install:
