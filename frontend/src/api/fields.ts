@@ -14,6 +14,12 @@ export interface FieldRead {
   color: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Set by create / update-with-geometry responses when an auto-fetch was
+   * enqueued. The frontend should subscribe to SSE on this job to drive the
+   * loading UI and refresh observations when it completes.
+   */
+  pending_job_id?: string | null;
 }
 
 export interface FieldCreatePayload {

@@ -7,6 +7,7 @@ avoid leaking existence of fields.
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import HTTPException, status
 from geoalchemy2.functions import ST_AsGeoJSON, ST_GeogFromText
@@ -24,8 +25,34 @@ from app.schemas.field import (
 )
 from app.utils.geo import polygon_to_wkt, validate_polygon
 
+log = logging.getLogger(__name__)
 
-async def _to_read(db: AsyncSession, field: Field) -> FieldRead:
+
+def _try_enqueue_observations(field_id: int) -> str | None:
+    """Best-effort hand-off to RQ.
+
+    Returns the RQ job_id so the API can surface it to the frontend (which
+    then subscribes to SSE for progress). Failure must not block field
+    creation — we just log and return None; the user can trigger a refresh
+    manually.
+    """
+    try:
+        from app.workers.dispatcher import enqueue_fetch_observations
+
+        handle = enqueue_fetch_observations(field_id)
+        return handle.job_id
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "Could not enqueue Sentinel fetch for field=%s: %s. "
+            "User can trigger refresh manually.",
+            field_id, exc,
+        )
+        return None
+
+
+async def _to_read(
+    db: AsyncSession, field: Field, pending_job_id: str | None = None
+) -> FieldRead:
     """Build a FieldRead DTO, fetching PostGIS geometries as GeoJSON.
 
     PostGIS stores WKB. ST_AsGeoJSON returns a JSON string we can json.loads
@@ -56,6 +83,7 @@ async def _to_read(db: AsyncSession, field: Field) -> FieldRead:
         color=field.color or crop.default_color,
         created_at=field.created_at,
         updated_at=field.updated_at,
+        pending_job_id=pending_job_id,
     )
 
 
@@ -74,7 +102,12 @@ async def create_field(db: AsyncSession, user_id: int, data: FieldCreate) -> Fie
     db.add(field)
     await db.flush()
     await db.refresh(field)  # pull back generated columns
-    return await _to_read(db, field)
+
+    # Kick off the 2-year Sentinel time-series fetch in the background and
+    # surface the job_id so the frontend can subscribe to SSE for progress.
+    pending_job_id = _try_enqueue_observations(field.id)
+
+    return await _to_read(db, field, pending_job_id=pending_job_id)
 
 
 async def list_fields(db: AsyncSession, user_id: int) -> list[FieldRead]:
@@ -95,10 +128,12 @@ async def update_field(
 ) -> FieldRead:
     field = await _get_owned_or_404(db, user_id, field_id)
 
+    geometry_changed = False
     if data.geometry is not None:
         validate_polygon(data.geometry)
         wkt = polygon_to_wkt(data.geometry)
         field.geom = ST_GeogFromText(f"SRID=4326;{wkt}")
+        geometry_changed = True
 
     if data.name is not None:
         field.name = data.name
@@ -111,7 +146,14 @@ async def update_field(
 
     await db.flush()
     await db.refresh(field)
-    return await _to_read(db, field)
+
+    # If geometry changed, prior observations don't match the new shape →
+    # re-fetch from Sentinel.
+    pending_job_id: str | None = None
+    if geometry_changed:
+        pending_job_id = _try_enqueue_observations(field.id)
+
+    return await _to_read(db, field, pending_job_id=pending_job_id)
 
 
 async def delete_field(db: AsyncSession, user_id: int, field_id: int) -> None:

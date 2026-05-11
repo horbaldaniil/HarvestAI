@@ -62,3 +62,14 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* Heatmap PNG: disable bilinear interpolation so individual 5m Sentinel-2
+   pixels show as sharp squares instead of blending into one smooth blob
+   when the browser scales the small PNG up to the map's pixel size.
+   `pixelated` is the Chrome/Firefox keyword; `crisp-edges` is the
+   WebKit/Safari alias. */
+.heatmap-overlay-pixelated {
+  image-rendering: pixelated;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}

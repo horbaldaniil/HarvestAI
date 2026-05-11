@@ -67,3 +67,7 @@ class FieldRead(BaseModel):
     color: str
     created_at: datetime
     updated_at: datetime
+    # Set only by create/update endpoints when they enqueued a Sentinel fetch.
+    # The frontend uses this to subscribe to SSE for progress and refresh
+    # observations once the job completes.
+    pending_job_id: str | None = None

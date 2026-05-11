@@ -68,6 +68,7 @@ dev = [
     "mypy>=1.13.0",
     "ipython>=8.29.0",
     "jupyter>=1.1.1",
+    "fakeredis>=2.35.1",
 ]
 
 [build-system]

@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import auth as auth_router
 from app.routers import fields as fields_router
+from app.routers import jobs as jobs_router
+from app.routers import observations as observations_router
+from app.routers import quota as quota_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -48,6 +51,9 @@ app.add_middleware(
 # Routers
 app.include_router(auth_router.router)
 app.include_router(fields_router.router)
+app.include_router(observations_router.router)
+app.include_router(jobs_router.router)
+app.include_router(quota_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

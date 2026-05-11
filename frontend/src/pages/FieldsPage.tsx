@@ -8,6 +8,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { FieldMap } from "@/components/map/FieldMap";
 import { FieldPolygon } from "@/components/map/FieldPolygon";
 import { FieldFocusController } from "@/components/map/FieldFocusController";
+import { HeatmapOverlay } from "@/components/map/HeatmapOverlay";
+import { IndexLegend } from "@/components/map/IndexLegend";
 import { PolygonDrawer, type LDrawer } from "@/components/map/PolygonDrawer";
 import { FieldsSidebar } from "@/components/fields/FieldsSidebar";
 import {
@@ -15,6 +17,7 @@ import {
   type FieldFormValues,
 } from "@/components/fields/FieldFormDialog";
 import { DeleteFieldDialog } from "@/components/fields/DeleteFieldDialog";
+import { BottomPanel } from "@/components/observations/BottomPanel";
 import {
   useCreateField,
   useDeleteField,
@@ -22,6 +25,7 @@ import {
   useUpdateField,
 } from "@/hooks/useFields";
 import type { FieldRead } from "@/api/fields";
+import type { IndexName } from "@/api/observations";
 
 type FormState =
   | { open: false }
@@ -44,6 +48,14 @@ export function FieldsPage() {
   // "Finish" button so the user can't try to complete with < 3 vertices.
   const [vertexCount, setVertexCount] = useState(0);
   const drawerRef = useRef<LDrawer | null>(null);
+  // Heatmap UI state: which index is active in the BottomPanel, and which
+  // date (if any) the user clicked → triggers heatmap overlay on the map.
+  const [activeIndex, setActiveIndex] = useState<IndexName>("ndvi");
+  const [heatmapDate, setHeatmapDate] = useState<string | null>(null);
+  // RQ job ids the backend handed back when it auto-enqueued a Sentinel fetch
+  // for a field (on create or geometry update). Keyed by field id so the
+  // BottomPanel can subscribe when the field becomes selected.
+  const [pendingJobs, setPendingJobs] = useState<Record<number, string>>({});
 
   const fields = fieldsQuery.data ?? [];
   const selectedField = useMemo(
@@ -99,6 +111,9 @@ export function FieldsPage() {
 
   const handleSelect = (field: FieldRead) => {
     setSelectedId(field.id);
+    // Clear heatmap state when switching fields — the date is meaningful only
+    // in the context of one field.
+    setHeatmapDate(null);
   };
 
   const handleEdit = (field: FieldRead) => {
@@ -124,6 +139,9 @@ export function FieldsPage() {
           geometry: form.polygon,
         });
         toast.success(t("fields.create.success"));
+        if (created.pending_job_id) {
+          setPendingJobs((p) => ({ ...p, [created.id]: created.pending_job_id! }));
+        }
         setSelectedId(created.id);
         setForm({ open: false });
       } else {
@@ -136,6 +154,9 @@ export function FieldsPage() {
           },
         });
         toast.success(t("fields.edit.success"));
+        if (updated.pending_job_id) {
+          setPendingJobs((p) => ({ ...p, [updated.id]: updated.pending_job_id! }));
+        }
         setSelectedId(updated.id);
         setForm({ open: false });
       }
@@ -194,6 +215,13 @@ export function FieldsPage() {
               />
             ))}
             <FieldFocusController field={selectedField} />
+            {selectedField && heatmapDate && (
+              <HeatmapOverlay
+                field={selectedField}
+                date={heatmapDate}
+                index={activeIndex}
+              />
+            )}
             <PolygonDrawer
               active={drawing}
               onComplete={handlePolygonComplete}
@@ -206,6 +234,26 @@ export function FieldsPage() {
             <div className="pointer-events-none absolute left-1/2 top-4 z-[1000] -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg">
               {t("fields.hint.drawing")}
             </div>
+          )}
+
+          {selectedField && heatmapDate && (
+            <IndexLegend index={activeIndex} date={heatmapDate} />
+          )}
+
+          {selectedField && !drawing && (
+            <BottomPanel
+              field={selectedField}
+              pendingJobId={pendingJobs[selectedField.id] ?? null}
+              selectedDate={heatmapDate}
+              activeIndex={activeIndex}
+              onSelectDate={setHeatmapDate}
+              onIndexChange={(idx) => {
+                setActiveIndex(idx);
+                // Switching index invalidates the current heatmap (it was rendered
+                // for a different colour-mapped variable). User must click again.
+                setHeatmapDate(null);
+              }}
+            />
           )}
         </div>
 

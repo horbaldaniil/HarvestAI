@@ -47,7 +47,10 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 # generated columns) and therefore cannot be created on SQLite. We skip them
 # for SQLite-based unit/integration tests; full coverage for these comes from
 # integration tests run against a real PostgreSQL+PostGIS instance.
-_POSTGIS_ONLY_TABLES: frozenset[str] = frozenset({"fields"})
+# satellite_observations FKs `fields`, so it must be skipped together.
+_POSTGIS_ONLY_TABLES: frozenset[str] = frozenset(
+    {"fields", "satellite_observations"}
+)
 
 
 @pytest_asyncio.fixture

@@ -24,7 +24,16 @@ export function useCreateField() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: FieldCreatePayload) => fieldsApi.createField(payload),
-    onSuccess: () => {
+    onSuccess: (newField) => {
+      // Optimistically prepend the new field to the cached list so
+      // `useFields().data` includes it immediately. Without this, the
+      // BottomPanel only mounts AFTER the background list refetch finishes
+      // (~200–500 ms), which is enough for a fast RQ job to publish its
+      // "done" event before the SSE subscription starts — leaving the
+      // chart empty.
+      qc.setQueryData<typeof newField[]>(FIELDS_KEY, (old) =>
+        old ? [newField, ...old.filter((f) => f.id !== newField.id)] : [newField],
+      );
       qc.invalidateQueries({ queryKey: FIELDS_KEY });
     },
   });
@@ -36,6 +45,11 @@ export function useUpdateField() {
     mutationFn: ({ id, payload }: { id: number; payload: FieldUpdatePayload }) =>
       fieldsApi.updateField(id, payload),
     onSuccess: (data) => {
+      // Patch the cached list in place so geometry/name/crop changes show
+      // immediately without waiting for the list refetch.
+      qc.setQueryData<typeof data[]>(FIELDS_KEY, (old) =>
+        old ? old.map((f) => (f.id === data.id ? data : f)) : [data],
+      );
       qc.invalidateQueries({ queryKey: FIELDS_KEY });
       qc.setQueryData(fieldKey(data.id), data);
     },

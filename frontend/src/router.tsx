@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
-import { FileText, Settings } from "lucide-react";
+import { FileText } from "lucide-react";
 
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
@@ -7,6 +7,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { FieldsPage } from "@/pages/FieldsPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { PlaceholderPage } from "@/pages/PlaceholderPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 export const router = createBrowserRouter([
@@ -53,11 +54,7 @@ export const router = createBrowserRouter([
     path: "/settings",
     element: (
       <ProtectedRoute>
-        <PlaceholderPage
-          title="Налаштування"
-          description="Профіль користувача, мова інтерфейсу, тема, налаштування сповіщень."
-          icon={<Settings className="h-5 w-5 text-primary" />}
-        />
+        <SettingsPage />
       </ProtectedRoute>
     ),
   },
