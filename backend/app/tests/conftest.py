@@ -43,11 +43,25 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
+# Tables that require PostgreSQL/PostGIS specifics (Geography columns, ST_*
+# generated columns) and therefore cannot be created on SQLite. We skip them
+# for SQLite-based unit/integration tests; full coverage for these comes from
+# integration tests run against a real PostgreSQL+PostGIS instance.
+_POSTGIS_ONLY_TABLES: frozenset[str] = frozenset({"fields"})
+
+
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False, future=True)
+
+    sqlite_safe_tables = [
+        t for t in Base.metadata.sorted_tables if t.name not in _POSTGIS_ONLY_TABLES
+    ]
+
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(
+            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=sqlite_safe_tables)
+        )
 
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as session:

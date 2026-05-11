@@ -18,9 +18,11 @@ const NAV_ITEMS = [
 
 interface AppShellProps {
   children: ReactNode;
+  /** Skip the centered container + padding (use for full-bleed pages like the map). */
+  fullBleed?: boolean;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, fullBleed = false }: AppShellProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: user } = useCurrentUser();
@@ -78,8 +80,14 @@ export function AppShell({ children }: AppShellProps) {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 overflow-auto">
-        <div className="container mx-auto p-6">{children}</div>
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {fullBleed ? (
+          children
+        ) : (
+          <div className="overflow-auto">
+            <div className="container mx-auto p-6">{children}</div>
+          </div>
+        )}
       </main>
     </div>
   );
