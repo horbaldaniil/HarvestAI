@@ -108,7 +108,7 @@ export function IndexChart({
             if (!active || !payload?.[0]) return null;
             const p = payload[0].payload as ChartPoint;
             return (
-              <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
+              <div className="rounded-md border bg-card px-3 py-2 text-xs shadow-md">
                 <div className="font-semibold">{label}</div>
                 <div className="mt-1 text-muted-foreground">
                   {p.value !== null && p.value !== undefined

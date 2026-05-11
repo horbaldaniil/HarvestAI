@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { Polygon as GJPolygon } from "geojson";
@@ -62,6 +63,24 @@ export function FieldsPage() {
     () => fields.find((f) => f.id === selectedId) ?? null,
     [fields, selectedId],
   );
+
+  // Deep-link support: /fields?selected=N (used by the Dashboard table click
+  // and the alerts bell). We apply the selection ONCE when the fields list
+  // has loaded and contains the target id, then strip the query param so a
+  // back-navigation doesn't keep re-selecting.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const raw = searchParams.get("selected");
+    if (!raw) return;
+    const requested = Number.parseInt(raw, 10);
+    if (Number.isNaN(requested)) return;
+    if (!fields.some((f) => f.id === requested)) return; // wait for list
+    setSelectedId(requested);
+    setHeatmapDate(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("selected");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, fields, setSearchParams]);
 
   // Poll the drawer's marker count while drawing. leaflet-draw does not emit
   // a vertex-added event we can hook into, so a 200ms interval is the

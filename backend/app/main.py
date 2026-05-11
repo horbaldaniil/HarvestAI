@@ -8,11 +8,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.ml.registry import get_registry
+from app.routers import alerts as alerts_router
 from app.routers import auth as auth_router
+from app.routers import dashboard as dashboard_router
 from app.routers import fields as fields_router
 from app.routers import jobs as jobs_router
 from app.routers import observations as observations_router
+from app.routers import predictions as predictions_router
 from app.routers import quota as quota_router
+from app.routers import weather as weather_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -25,6 +30,12 @@ log = logging.getLogger("harvestai")
 async def lifespan(app: FastAPI):
     log.info("Starting %s (env=%s)", settings.app_name, settings.app_env)
     settings.ensure_directories()
+    # Pre-load yield models so the first prediction request isn't slowed by
+    # joblib + SHAP-explainer init (~300 ms).
+    try:
+        get_registry().load_all()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("ModelRegistry preload failed: %s", exc)
     yield
     log.info("Shutting down %s", settings.app_name)
 
@@ -52,6 +63,10 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(fields_router.router)
 app.include_router(observations_router.router)
+app.include_router(predictions_router.router)
+app.include_router(alerts_router.router)
+app.include_router(weather_router.router)
+app.include_router(dashboard_router.router)
 app.include_router(jobs_router.router)
 app.include_router(quota_router.router)
 

@@ -29,21 +29,23 @@ log = logging.getLogger(__name__)
 
 
 def _try_enqueue_observations(field_id: int) -> str | None:
-    """Best-effort hand-off to RQ.
+    """Best-effort hand-off to the full post-create pipeline.
 
-    Returns the RQ job_id so the API can surface it to the frontend (which
-    then subscribes to SSE for progress). Failure must not block field
-    creation — we just log and return None; the user can trigger a refresh
-    manually.
+    Enqueues the chained jobs:
+      fetch_sentinel → fetch_weather → predict_yield → check_anomalies
+
+    The returned job_id is the LAST job in the chain. Front-end subscribes
+    to its SSE stream — when it reports "done", all four upstream jobs
+    have already completed (RQ depends_on guarantees ordering).
     """
     try:
-        from app.workers.dispatcher import enqueue_fetch_observations
+        from app.workers.dispatcher import enqueue_full_pipeline
 
-        handle = enqueue_fetch_observations(field_id)
+        handle = enqueue_full_pipeline(field_id)
         return handle.job_id
     except Exception as exc:  # noqa: BLE001
         log.warning(
-            "Could not enqueue Sentinel fetch for field=%s: %s. "
+            "Could not enqueue post-create pipeline for field=%s: %s. "
             "User can trigger refresh manually.",
             field_id, exc,
         )

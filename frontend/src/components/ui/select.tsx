@@ -36,7 +36,8 @@ export const SelectContent = React.forwardRef<
       ref={ref}
       className={cn(
         // z-[2100] so the dropdown appears above any Dialog we may be inside.
-        "relative z-[2100] max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out",
+        // bg-card (not bg-popover) — see note in dropdown-menu.tsx.
+        "relative z-[2100] max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-card text-card-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
         className,

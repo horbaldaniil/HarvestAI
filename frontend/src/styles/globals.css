@@ -11,6 +11,12 @@
     --foreground: 130 25% 12%;
     --card: 0 0% 100%;
     --card-foreground: 130 25% 12%;
+    /* --popover MUST be defined; both the bell dropdown and the crop-
+       selector use `bg-popover` and without these vars Tailwind compiles
+       to `background-color: hsl()` which the browser drops, making the
+       menu visually transparent. */
+    --popover: 0 0% 100%;
+    --popover-foreground: 130 25% 12%;
     --primary: 84 36% 45%;
     --primary-foreground: 60 30% 98%;
     --secondary: 84 25% 92%;
@@ -32,6 +38,8 @@
     --foreground: 60 20% 92%;
     --card: 130 18% 12%;
     --card-foreground: 60 20% 92%;
+    --popover: 130 18% 12%;
+    --popover-foreground: 60 20% 92%;
     --primary: 84 36% 55%;
     --primary-foreground: 130 25% 12%;
     --secondary: 130 15% 18%;

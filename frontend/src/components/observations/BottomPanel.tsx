@@ -22,6 +22,7 @@ import {
   useTrackObservationJob,
 } from "@/hooks/useObservations";
 import { IndexChart } from "./IndexChart";
+import { PredictionCard } from "./PredictionCard";
 
 const INDICES: IndexName[] = ["ndvi", "evi", "ndwi", "savi"];
 
@@ -169,37 +170,42 @@ export function BottomPanel({
         </div>
       )}
 
-      {/* Chart body */}
+      {/* Chart body — split layout: chart on the left, PredictionCard on the right */}
       {!collapsed && (
-        <div className="h-[calc(100%-3rem)] px-2 pb-2 pt-1">
-          {obsQuery.isLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            </div>
-          ) : observations.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-              <p className="text-sm font-semibold">{t("observations.empty.title")}</p>
-              <p className="max-w-sm text-xs text-muted-foreground">
-                {t("observations.empty.description")}
-              </p>
-              <Button size="sm" onClick={handleRefresh} disabled={!!isRefreshing}>
-                <RefreshCw className="h-3.5 w-3.5" />
-                {t("observations.empty.cta")}
-              </Button>
-            </div>
-          ) : (
-            <>
-              <div className="absolute right-6 top-12 text-[10px] text-muted-foreground">
-                {t("observations.clickHint")}
+        <div className="flex h-[calc(100%-3rem)]">
+          <div className="relative flex-1 px-2 pb-2 pt-1">
+            {obsQuery.isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
               </div>
-              <IndexChart
-                observations={observations}
-                index={activeIndex}
-                selectedDate={selectedDate}
-                onPointClick={handlePointClick}
-              />
-            </>
-          )}
+            ) : observations.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                <p className="text-sm font-semibold">{t("observations.empty.title")}</p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                  {t("observations.empty.description")}
+                </p>
+                <Button size="sm" onClick={handleRefresh} disabled={!!isRefreshing}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {t("observations.empty.cta")}
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="absolute right-6 top-2 text-[10px] text-muted-foreground">
+                  {t("observations.clickHint")}
+                </div>
+                <IndexChart
+                  observations={observations}
+                  index={activeIndex}
+                  selectedDate={selectedDate}
+                  onPointClick={handlePointClick}
+                />
+              </>
+            )}
+          </div>
+          <div className="w-72 flex-shrink-0 border-l">
+            <PredictionCard fieldId={field.id} />
+          </div>
         </div>
       )}
     </div>

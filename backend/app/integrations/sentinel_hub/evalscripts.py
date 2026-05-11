@@ -42,6 +42,12 @@ function setup() {
   };
 }
 
+// Clamp helper — keeps values inside what our NUMERIC(5,3) column can store
+// (|x| < 100). EVI's formula has an unstable denominator on water/shadow
+// pixels and can spike into the billions; without clamping those poison
+// the bucket aggregate and overflow Postgres.
+function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 function evaluatePixel(s) {
   if (s.dataMask !== 1) {
     return {
@@ -53,17 +59,23 @@ function evaluatePixel(s) {
   const red = s.B04;
   const blue = s.B02;
   const green = s.B03;
-  const denom = nir + red;
 
-  const ndvi = denom > 0 ? (nir - red) / denom : NaN;
-  const evi  = 2.5 * (nir - red) / (nir + 6.0 * red - 7.5 * blue + 1.0);
-  const ndwi = (green + nir) > 0 ? (green - nir) / (green + nir) : NaN;
-  const savi = (nir - red) * 1.5 / (nir + red + 0.5);
+  const denomR = nir + red;
+  const denomW = green + nir;
+  const eviDenom = nir + 6.0 * red - 7.5 * blue + 1.0;
+
+  // Guard the denominators. EVI's denominator can become very small or
+  // negative on water/dark pixels — return NaN there so the pixel doesn't
+  // skew the aggregate.
+  const ndvi = denomR > 0 ? (nir - red) / denomR : NaN;
+  const evi  = Math.abs(eviDenom) > 0.05 ? clamp(2.5 * (nir - red) / eviDenom, -2, 2) : NaN;
+  const ndwi = denomW > 0 ? (green - nir) / denomW : NaN;
+  const savi = clamp((nir - red) * 1.5 / (nir + red + 0.5), -2, 2);
 
   return {
-    ndvi: [ndvi],
+    ndvi: [clamp(ndvi, -1, 1)],
     evi:  [evi],
-    ndwi: [ndwi],
+    ndwi: [clamp(ndwi, -1, 1)],
     savi: [savi],
     dataMask: [1]
   };

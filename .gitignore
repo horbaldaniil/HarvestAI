@@ -51,14 +51,21 @@ out/
 *.tsbuildinfo
 
 # ─── ML / Data ────────────────────────────────────────
-backend/models/*.joblib
-backend/models/*.pt
-backend/models/*.onnx
-backend/data/raw/*
-backend/data/processed/*
-!backend/data/raw/.gitkeep
-!backend/data/processed/.gitkeep
+# Default-ignore generated artefacts; selectively allow the small ones we
+# *do* want in the repo (USDA yield CSV, seasonal_norms.json, joblib files).
+backend/models/*
 !backend/models/.gitkeep
+!backend/models/yield_xgb_*.joblib
+!backend/models/README.md
+backend/data/raw/*
+!backend/data/raw/.gitkeep
+!backend/data/raw/usda_ukraine_yield_2017_2023.csv
+backend/data/processed/*
+!backend/data/processed/.gitkeep
+!backend/data/processed/seasonal_norms.json
+backend/notebooks/.ipynb_checkpoints/
+*.pt
+*.onnx
 *.pkl
 *.h5
 

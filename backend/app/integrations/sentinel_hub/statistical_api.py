@@ -102,8 +102,15 @@ def _extract_stat(outputs: dict, output_id: str, key: str) -> float | None:
         # Sentinel Hub uses "NaN" string sentinel for masked aggregates.
         if isinstance(v, str):
             return None
-        return float(v)
-    except (KeyError, TypeError):
+        f = float(v)
+        # Defense in depth: even with evalscript clamping, an aggregate
+        # can occasionally spill outside [-10, 10] from accumulated FP
+        # error. NUMERIC(5,3) caps at |x| < 100; we reject anything
+        # patently nonsensical for a vegetation index.
+        if not (-10.0 <= f <= 10.0):
+            return None
+        return f
+    except (KeyError, TypeError, ValueError):
         return None
 
 

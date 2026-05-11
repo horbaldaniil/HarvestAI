@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LayoutDashboard, Map, MessageSquare, FileText, Settings, LogOut } from "lucide-react";
 
+import { AlertsBell } from "@/components/alerts/AlertsBell";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser, useLogout } from "@/hooks/useAuth";
@@ -81,10 +82,14 @@ export function AppShell({ children, fullBleed = false }: AppShellProps) {
 
       {/* Main */}
       <main className="flex flex-1 flex-col overflow-hidden">
+        {/* Top bar: alerts bell etc. Sits above all content. */}
+        <header className="flex h-12 flex-shrink-0 items-center justify-end border-b bg-card px-4">
+          <AlertsBell />
+        </header>
         {fullBleed ? (
-          children
+          <div className="flex-1 overflow-hidden">{children}</div>
         ) : (
-          <div className="overflow-auto">
+          <div className="flex-1 overflow-auto">
             <div className="container mx-auto p-6">{children}</div>
           </div>
         )}

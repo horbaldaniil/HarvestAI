@@ -48,9 +48,16 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 # for SQLite-based unit/integration tests; full coverage for these comes from
 # integration tests run against a real PostgreSQL+PostGIS instance.
 # satellite_observations FKs `fields`, so it must be skipped together.
-_POSTGIS_ONLY_TABLES: frozenset[str] = frozenset(
-    {"fields", "satellite_observations"}
-)
+# Anything that FKs to `fields` (and therefore inherits the PostGIS dependency)
+# also has to be skipped. JSONB columns in `predictions` likewise need
+# PostgreSQL.
+_POSTGIS_ONLY_TABLES: frozenset[str] = frozenset({
+    "fields",
+    "satellite_observations",
+    "predictions",
+    "alerts",
+    "weather_observations",
+})
 
 
 @pytest_asyncio.fixture
