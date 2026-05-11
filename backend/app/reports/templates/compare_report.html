@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+    <h2>Загальні показники</h2>
+    <table class="kpi-grid">
+        <tr>
+            <td>
+                <div class="kpi-label">Полів у порівнянні</div>
+                <div class="kpi-value">{{ fields|length }}</div>
+            </td>
+            <td>
+                <div class="kpi-label">Сумарна площа</div>
+                <div class="kpi-value">{{ '%.1f'|format(total_area_ha) }} га</div>
+            </td>
+            <td>
+                <div class="kpi-label">Сума прогнозу</div>
+                <div class="kpi-value">
+                    {% if total_predicted_t is not none %}
+                        {{ '%.1f'|format(total_predicted_t) }} т
+                    {% else %}—{% endif %}
+                </div>
+            </td>
+            <td>
+                <div class="kpi-label">Період</div>
+                <div class="kpi-value" style="font-size: 11pt;">
+                    {{ date_from }}<br>{{ date_to }}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    {% if summary_text %}
+    <div class="summary-box">
+        <div class="label">AI-аналіз</div>
+        <div>{{ summary_text }}</div>
+    </div>
+    {% endif %}
+
+    <h2>Порівняльна таблиця</h2>
+    <table class="data">
+        <thead>
+            <tr>
+                <th>Поле</th>
+                <th>Культура</th>
+                <th class="num">Площа, га</th>
+                <th class="num">NDVI ср.</th>
+                <th class="num">NDVI пік</th>
+                <th class="num">Прогноз, т/га</th>
+                <th class="num">Алерти</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for f in fields %}
+        <tr>
+            <td>{{ f.name }}</td>
+            <td>{{ f.crop_label }}</td>
+            <td class="num">{{ '%.1f'|format(f.area_ha) }}</td>
+            <td class="num">{{ '%.2f'|format(f.ndvi_mean) if f.ndvi_mean is not none else '—' }}</td>
+            <td class="num">{{ '%.2f'|format(f.ndvi_peak) if f.ndvi_peak is not none else '—' }}</td>
+            <td class="num">{{ '%.1f'|format(f.predicted_tha) if f.predicted_tha is not none else '—' }}</td>
+            <td class="num">{{ f.alerts_count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if ndvi_chart_uri %}
+    <h2>Динаміка NDVI по полях</h2>
+    <div class="chart-box">
+        <img src="{{ ndvi_chart_uri }}" alt="NDVI comparison" style="max-width: 100%;">
+    </div>
+    {% endif %}
+
+{% endblock %}

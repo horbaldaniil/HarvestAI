@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   ChevronDown,
   ChevronUp,
+  Download,
   Loader2,
   RefreshCw,
   Satellite,
@@ -15,6 +16,7 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import type { FieldRead } from "@/api/fields";
 import type { IndexName } from "@/api/observations";
+import { downloadFieldReport, triggerBrowserDownload } from "@/api/reports";
 import {
   useObservations,
   useRefreshObservations,
@@ -50,6 +52,7 @@ export function BottomPanel({
 }: BottomPanelProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const obsQuery = useObservations(field.id);
   const refreshMut = useRefreshObservations();
@@ -74,6 +77,20 @@ export function BottomPanel({
     } catch (err) {
       const ax = err as AxiosError<{ detail?: string }>;
       toast.error(ax.response?.data?.detail ?? t("observations.refreshFailed"));
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await downloadFieldReport(field.id);
+      const safe = field.name.replace(/[^\p{L}\p{N}_-]+/gu, "_").slice(0, 60);
+      triggerBrowserDownload(blob, `HarvestAI_${safe}_${field.season_year}.pdf`);
+      toast.success(t("report.success"));
+    } catch {
+      toast.error(t("report.error"));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -141,6 +158,21 @@ export function BottomPanel({
               <RefreshCw className="h-3.5 w-3.5" />
             )}
             {isRefreshing ? t("observations.refreshing") : t("observations.refresh")}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting}
+            title={t("report.export")}
+          >
+            {exporting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            {exporting ? t("report.exporting") : t("report.export")}
           </Button>
 
           <Button

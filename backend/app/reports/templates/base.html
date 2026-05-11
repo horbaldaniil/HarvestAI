@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1.5cm 1.5cm 1.8cm 1.5cm;
+        }
+
+        body {
+            /* `DejaVuSans` is the no-space name we register with ReportLab in
+               engine.py — that's the only one xhtml2pdf can match. The
+               two-token `DejaVu Sans` covers WeasyPrint via fontconfig. */
+            font-family: "DejaVuSans", "DejaVu Sans", "Helvetica", "Arial", sans-serif;
+            font-size: 10pt;
+            color: #1f2937;
+            line-height: 1.4;
+        }
+
+        h1 { font-size: 18pt; color: #14532d; margin: 0 0 4pt 0; }
+        h2 { font-size: 13pt; color: #14532d; margin: 14pt 0 6pt 0; border-bottom: 1pt solid #d1d5db; padding-bottom: 2pt; }
+        h3 { font-size: 11pt; color: #374151; margin: 8pt 0 4pt 0; }
+
+        .report-header {
+            border-bottom: 2pt solid #14532d;
+            padding-bottom: 6pt;
+            margin-bottom: 10pt;
+        }
+        .report-header .tagline {
+            color: #6b7280;
+            font-size: 9pt;
+            margin: 0;
+        }
+        .report-header .meta {
+            float: right;
+            text-align: right;
+            font-size: 9pt;
+            color: #6b7280;
+        }
+
+        .kpi-grid {
+            width: 100%;
+            margin: 6pt 0;
+        }
+        .kpi-grid td {
+            width: 25%;
+            padding: 6pt;
+            background: #f3f4f6;
+            border: 1pt solid #e5e7eb;
+            vertical-align: top;
+        }
+        .kpi-label {
+            font-size: 8pt;
+            color: #6b7280;
+            text-transform: uppercase;
+        }
+        .kpi-value {
+            font-size: 14pt;
+            font-weight: bold;
+            color: #14532d;
+            margin-top: 2pt;
+        }
+
+        .field-meta {
+            width: 100%;
+            font-size: 9pt;
+            margin-bottom: 8pt;
+        }
+        .field-meta th {
+            text-align: left;
+            color: #6b7280;
+            font-weight: normal;
+            width: 25%;
+            padding: 2pt 6pt 2pt 0;
+        }
+        .field-meta td {
+            padding: 2pt 0;
+            font-weight: bold;
+        }
+
+        .summary-box {
+            background: #ecfdf5;
+            border-left: 3pt solid #16a34a;
+            padding: 6pt 10pt;
+            margin: 8pt 0;
+            font-size: 10pt;
+        }
+        .summary-box .label {
+            font-size: 8pt;
+            color: #16a34a;
+            text-transform: uppercase;
+            font-weight: bold;
+            margin-bottom: 2pt;
+        }
+
+        .prediction-card {
+            background: #f9fafb;
+            border: 1pt solid #e5e7eb;
+            padding: 8pt 12pt;
+            margin: 6pt 0;
+        }
+        .prediction-card .value {
+            font-size: 22pt;
+            font-weight: bold;
+            color: #14532d;
+        }
+        .prediction-card .confidence {
+            font-size: 10pt;
+            color: #6b7280;
+        }
+        .prediction-card .model {
+            font-size: 8pt;
+            color: #9ca3af;
+            margin-top: 4pt;
+        }
+
+        .alert-row {
+            padding: 6pt 8pt;
+            margin: 3pt 0;
+            border-left: 3pt solid;
+            background: #fafafa;
+            font-size: 9pt;
+        }
+        .alert-row.critical { border-left-color: #dc2626; background: #fef2f2; }
+        .alert-row.warning  { border-left-color: #d97706; background: #fffbeb; }
+        .alert-row.info     { border-left-color: #2563eb; background: #eff6ff; }
+        .alert-row .severity {
+            font-size: 8pt;
+            text-transform: uppercase;
+            font-weight: bold;
+            margin-right: 6pt;
+        }
+        .alert-row.critical .severity { color: #dc2626; }
+        .alert-row.warning  .severity { color: #d97706; }
+        .alert-row.info     .severity { color: #2563eb; }
+
+        .chart-box {
+            text-align: center;
+            margin: 8pt 0;
+        }
+        .chart-box img {
+            max-width: 100%;
+        }
+
+        .charts-grid {
+            width: 100%;
+        }
+        .charts-grid td {
+            width: 50%;
+            padding: 4pt;
+            vertical-align: top;
+        }
+
+        table.data {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 8.5pt;
+            margin: 6pt 0;
+        }
+        table.data th, table.data td {
+            border: 1pt solid #e5e7eb;
+            padding: 4pt 6pt;
+            text-align: left;
+        }
+        table.data th {
+            background: #f3f4f6;
+            font-weight: bold;
+            color: #374151;
+        }
+        table.data td.num { text-align: right; }
+
+        .footer {
+            font-size: 8pt;
+            color: #6b7280;
+            border-top: 1pt solid #e5e7eb;
+            padding-top: 4pt;
+            margin-top: 12pt;
+        }
+        .footer .qr {
+            float: right;
+        }
+        .footer .qr img { width: 60pt; height: 60pt; }
+
+        .page-break { page-break-before: always; }
+
+        .muted { color: #6b7280; }
+        .pos { color: #16a34a; }
+        .neg { color: #dc2626; }
+    </style>
+</head>
+<body>
+    <div class="report-header">
+        <div class="meta">
+            <strong>HarvestAI</strong><br>
+            Сформовано: {{ generated_at }}
+        </div>
+        <h1>{{ heading }}</h1>
+        <p class="tagline">{{ subheading }}</p>
+    </div>
+
+    {% block content %}{% endblock %}
+
+    <div class="footer">
+        {% if qr_uri %}
+        <div class="qr">
+            <img src="{{ qr_uri }}" alt="QR">
+        </div>
+        {% endif %}
+        <div>
+            Сторінка автоматично сгенерована платформою HarvestAI.<br>
+            Прогнози і рекомендації мають довідковий характер.
+        </div>
+    </div>
+</body>
+</html>

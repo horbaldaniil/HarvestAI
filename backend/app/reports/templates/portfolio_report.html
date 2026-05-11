@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+    <h2>Огляд показників</h2>
+    <table class="kpi-grid">
+        <tr>
+            <td>
+                <div class="kpi-label">Полів</div>
+                <div class="kpi-value">{{ kpis.total_fields }}</div>
+            </td>
+            <td>
+                <div class="kpi-label">Загальна площа</div>
+                <div class="kpi-value">{{ '%.1f'|format(kpis.total_area_ha) }} га</div>
+            </td>
+            <td>
+                <div class="kpi-label">Прогнозований урожай</div>
+                <div class="kpi-value">
+                    {% if kpis.predicted_total_yield_t is not none %}
+                        {{ '%.1f'|format(kpis.predicted_total_yield_t) }} т
+                    {% else %}—{% endif %}
+                </div>
+            </td>
+            <td>
+                <div class="kpi-label">Активних сповіщень</div>
+                <div class="kpi-value">{{ kpis.active_alerts_count }}</div>
+            </td>
+        </tr>
+    </table>
+
+    {% if summary_text %}
+    <div class="summary-box">
+        <div class="label">AI-аналіз</div>
+        <div>{{ summary_text }}</div>
+    </div>
+    {% endif %}
+
+    <h2>Поля</h2>
+    {% if fields %}
+    <table class="data">
+        <thead>
+            <tr>
+                <th>Назва</th>
+                <th>Культура</th>
+                <th class="num">Площа, га</th>
+                <th class="num">NDVI</th>
+                <th class="num">Прогноз, т/га</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for f in fields %}
+        <tr>
+            <td>{{ f.name }}</td>
+            <td>{{ f.crop_label }}</td>
+            <td class="num">{{ '%.1f'|format(f.area_ha) }}</td>
+            <td class="num">{{ '%.2f'|format(f.current_ndvi) if f.current_ndvi is not none else '—' }}</td>
+            <td class="num">{{ '%.1f'|format(f.predicted_tha) if f.predicted_tha is not none else '—' }}</td>
+            <td>{{ 'УВАГА' if f.has_alerts else 'OK' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">У вас ще немає створених полів.</p>
+    {% endif %}
+
+    <h2>Порівняння рік-до-року (NDVI)</h2>
+    {% if yoy.prev_year_avg_ndvi is not none %}
+    <table class="field-meta">
+        <tr><th>Поточний рік ({{ yoy.current_year }})</th><td>{{ '%.2f'|format(yoy.current_year_avg_ndvi) if yoy.current_year_avg_ndvi is not none else '—' }}</td></tr>
+        <tr><th>Попередній рік ({{ yoy.current_year - 1 }})</th><td>{{ '%.2f'|format(yoy.prev_year_avg_ndvi) }}</td></tr>
+        <tr>
+            <th>Різниця</th>
+            <td class="{{ 'pos' if (yoy.diff_pct or 0) >= 0 else 'neg' }}">
+                {% if yoy.diff_pct is not none %}
+                    {{ '+' if yoy.diff_pct >= 0 else '' }}{{ '%.1f'|format(yoy.diff_pct) }}%
+                {% else %}—{% endif %}
+            </td>
+        </tr>
+    </table>
+    {% else %}
+    <p class="muted">Немає даних попереднього року для порівняння.</p>
+    {% endif %}
+
+    {# ───── Page 2: alerts ───── #}
+    {% if alerts %}
+    <div class="page-break"></div>
+    <h2>Активні сповіщення</h2>
+    {% for alert in alerts %}
+    <div class="alert-row {{ alert.severity }}">
+        <span class="severity">{{ alert.severity_label }}</span>
+        {% if alert.field_name %}<strong>{{ alert.field_name }}:</strong>{% endif %}
+        {{ alert.message_uk }}
+        <div class="muted" style="font-size: 8pt;">{{ alert.created_at }} · тип: {{ alert.type }}</div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+{% endblock %}

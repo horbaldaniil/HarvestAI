@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+    {# ───── Page 1: Identity + AI summary ───── #}
+
+    <h2>Загальна інформація</h2>
+    <table class="field-meta">
+        <tr><th>Назва</th><td>{{ field.name }}</td></tr>
+        <tr><th>Культура</th><td>{{ field.crop_label }}</td></tr>
+        <tr><th>Сезон</th><td>{{ field.season_year }}</td></tr>
+        <tr><th>Площа</th><td>{{ '%.2f'|format(field.area_ha) }} га</td></tr>
+        {% if field.centroid_lat is not none %}
+        <tr><th>Центроїд</th><td>{{ '%.5f'|format(field.centroid_lat) }}, {{ '%.5f'|format(field.centroid_lon) }}</td></tr>
+        {% endif %}
+    </table>
+
+    {% if summary_text %}
+    <div class="summary-box">
+        <div class="label">AI-аналіз</div>
+        <div>{{ summary_text }}</div>
+    </div>
+    {% endif %}
+
+    {% if heatmap_uri %}
+    <h2>Поточний стан (NDVI heatmap)</h2>
+    <div class="chart-box">
+        <img src="{{ heatmap_uri }}" alt="NDVI heatmap" style="max-height: 250pt;">
+        {% if heatmap_date %}<p class="muted" style="font-size: 8pt;">Дата зйомки: {{ heatmap_date }}</p>{% endif %}
+    </div>
+    {% endif %}
+
+    {# ───── Page 2: vegetation index time series ───── #}
+    <div class="page-break"></div>
+    <h2>Динаміка вегетаційних індексів</h2>
+    <table class="charts-grid">
+        {% for row in index_charts|batch(2) %}
+        <tr>
+            {% for chart in row %}
+            <td><div class="chart-box"><img src="{{ chart.uri }}" alt="{{ chart.label }}"></div></td>
+            {% endfor %}
+            {% if row|length == 1 %}<td></td>{% endif %}
+        </tr>
+        {% endfor %}
+    </table>
+
+    {# ───── Page 3: prediction + SHAP + alerts ───── #}
+    <div class="page-break"></div>
+    <h2>Прогноз врожайності</h2>
+    {% if prediction %}
+        <div class="prediction-card">
+            <div class="value">
+                {{ '%.2f'|format(prediction.value_tha) }}
+                {% if prediction.confidence_tha is not none %}
+                <span class="confidence">± {{ '%.2f'|format(prediction.confidence_tha) }}</span>
+                {% endif %}
+                <span class="muted" style="font-size: 12pt;">т/га</span>
+            </div>
+            <div class="model">
+                модель: {{ prediction.model_name }} v{{ prediction.model_version }} ·
+                прогноз сформовано: {{ prediction.predicted_at }}
+            </div>
+        </div>
+        <h3>Топ-фактори впливу</h3>
+        <div class="chart-box"><img src="{{ shap_uri }}" alt="SHAP top-5"></div>
+    {% else %}
+        <p class="muted">Прогноз ще не сформовано. Запустіть розрахунок зі сторінки поля.</p>
+    {% endif %}
+
+    <h2>Аномалії та сповіщення</h2>
+    {% if alerts %}
+        {% for alert in alerts %}
+        <div class="alert-row {{ alert.severity }}">
+            <span class="severity">{{ alert.severity_label }}</span>
+            {{ alert.message_uk }}
+            <div class="muted" style="font-size: 8pt;">{{ alert.created_at }} · тип: {{ alert.type }}</div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p class="muted">Активних аномалій немає.</p>
+    {% endif %}
+
+    {# ───── Page 4: weather forecast ───── #}
+    {% if forecast %}
+    <div class="page-break"></div>
+    <h2>Прогноз погоди на 14 днів</h2>
+    <table class="data">
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th class="num">T мін, °C</th>
+                <th class="num">T макс, °C</th>
+                <th class="num">Опади, мм</th>
+                <th class="num">Вологість, %</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for day in forecast %}
+        <tr>
+            <td>{{ day.date }}</td>
+            <td class="num">{{ day.temp_min_c if day.temp_min_c is not none else '—' }}</td>
+            <td class="num">{{ day.temp_max_c if day.temp_max_c is not none else '—' }}</td>
+            <td class="num">{{ day.precip_mm if day.precip_mm is not none else '—' }}</td>
+            <td class="num">{{ day.humidity_pct if day.humidity_pct is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+{% endblock %}

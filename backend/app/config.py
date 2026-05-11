@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_max_tokens: int = 600
     openai_daily_token_budget: int = 100_000
+    # Soft rate-limit per user, rolling 1-hour window. Set to 0 to disable.
+    chat_rate_limit_per_hour: int = 20
 
     # ─── OpenWeather ────────────────────────────────────────────
     openweather_api_key: str = ""

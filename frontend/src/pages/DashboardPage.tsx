@@ -1,12 +1,15 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { uk } from "date-fns/locale";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
   Bell,
+  Download,
   Leaf,
   Loader2,
   Minus,
@@ -26,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { AppShell } from "@/components/layout/AppShell";
 import { useDashboard } from "@/hooks/useDashboard";
 import { useAlerts, useAcknowledgeAlert } from "@/hooks/useAlerts";
+import { downloadPortfolioReport, triggerBrowserDownload } from "@/api/reports";
 import { CROP_COLORS } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 import type { DashboardFieldRow, YearOverYear as YoYType } from "@/api/dashboard";
@@ -33,6 +37,7 @@ import type { DashboardFieldRow, YearOverYear as YoYType } from "@/api/dashboard
 export function DashboardPage() {
   const { t } = useTranslation();
   const { data, isLoading } = useDashboard();
+  const [exporting, setExporting] = useState(false);
 
   if (isLoading || !data) {
     return (
@@ -46,12 +51,36 @@ export function DashboardPage() {
 
   const { kpis, fields, yoy } = data;
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await downloadPortfolioReport();
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "");
+      triggerBrowserDownload(blob, `HarvestAI_portfolio_${stamp}.pdf`);
+      toast.success(t("report.success"));
+    } catch {
+      toast.error(t("report.error"));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <AppShell>
       <div className="space-y-6">
-        <header>
-          <h1 className="text-3xl font-bold tracking-tight">{t("dashboard.title")}</h1>
-          <p className="text-muted-foreground">{t("app.tagline")}</p>
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">{t("dashboard.title")}</h1>
+            <p className="text-muted-foreground">{t("app.tagline")}</p>
+          </div>
+          <Button onClick={handleExport} disabled={exporting} variant="outline">
+            {exporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {exporting ? t("report.exporting") : t("report.portfolioExport")}
+          </Button>
         </header>
 
         {/* KPI cards */}

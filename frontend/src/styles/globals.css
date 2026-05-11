@@ -81,3 +81,41 @@
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
+
+/* Lightweight markdown styling for chat-bot messages. We don't pull in
+   `@tailwindcss/typography` because it adds ~30 KB for an effect we use
+   in exactly one place — assistant bubbles in the chat panel. */
+.markdown-body p {
+  margin: 0 0 0.5em 0;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.25em 0 0.5em 1.25em;
+  padding-left: 0.5em;
+}
+.markdown-body ul li {
+  list-style: disc;
+}
+.markdown-body ol li {
+  list-style: decimal;
+}
+.markdown-body li {
+  margin: 0.15em 0;
+}
+.markdown-body strong {
+  font-weight: 600;
+}
+.markdown-body code {
+  background: hsl(var(--muted));
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+.markdown-body a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}

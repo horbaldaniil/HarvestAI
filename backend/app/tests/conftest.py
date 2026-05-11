@@ -57,6 +57,11 @@ _POSTGIS_ONLY_TABLES: frozenset[str] = frozenset({
     "predictions",
     "alerts",
     "weather_observations",
+    # chat_sessions has a FK to `fields`, so it inherits the skip.
+    "chat_sessions",
+    "chat_messages",
+    # generated_reports stores `params_json` as JSONB — PostgreSQL-only.
+    "generated_reports",
 })
 
 

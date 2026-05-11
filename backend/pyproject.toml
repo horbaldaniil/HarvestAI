@@ -42,8 +42,14 @@ dependencies = [
     "openai>=1.54.0",
     "httpx>=0.27.2",
     # ─── PDF generation ──────────────────────────────
+    # WeasyPrint is the preferred engine (best CSS support) but it needs GTK3
+    # runtime on Windows. xhtml2pdf is pure-Python and works everywhere — we
+    # fall back to it automatically when WeasyPrint can't be imported.
     "weasyprint>=63.0",
+    "xhtml2pdf>=0.2.16",
     "matplotlib>=3.9.2",
+    "jinja2>=3.1.4",
+    "qrcode[pil]>=8.0",
     # ─── Utilities ───────────────────────────────────
     "python-dotenv>=1.0.1",
     "tenacity>=9.0.0",

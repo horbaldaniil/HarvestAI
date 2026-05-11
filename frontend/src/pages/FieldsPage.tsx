@@ -27,6 +27,7 @@ import {
 } from "@/hooks/useFields";
 import type { FieldRead } from "@/api/fields";
 import type { IndexName } from "@/api/observations";
+import { useChatStore } from "@/stores/chatStore";
 
 type FormState =
   | { open: false }
@@ -63,6 +64,14 @@ export function FieldsPage() {
     () => fields.find((f) => f.id === selectedId) ?? null,
     [fields, selectedId],
   );
+
+  // Keep the chat-bot aware of which field the user is viewing so a new chat
+  // session opened from this page is auto-scoped to it.
+  const setContextField = useChatStore((s) => s.setContextField);
+  useEffect(() => {
+    setContextField(selectedId);
+    return () => setContextField(null);
+  }, [selectedId, setContextField]);
 
   // Deep-link support: /fields?selected=N (used by the Dashboard table click
   // and the alerts bell). We apply the selection ONCE when the fields list

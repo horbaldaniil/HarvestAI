@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { LayoutDashboard, Map, MessageSquare, FileText, Settings, LogOut } from "lucide-react";
 
 import { AlertsBell } from "@/components/alerts/AlertsBell";
+import { ChatPanel } from "@/components/chat/ChatPanel";
+import { FloatingChatButton } from "@/components/chat/FloatingChatButton";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser, useLogout } from "@/hooks/useAuth";
@@ -94,6 +96,11 @@ export function AppShell({ children, fullBleed = false }: AppShellProps) {
           </div>
         )}
       </main>
+
+      {/* Global chat — floating button + panel. Rendered outside <main> so
+          they overlay every page (including full-bleed map). */}
+      <FloatingChatButton />
+      <ChatPanel />
     </div>
   );
 }
