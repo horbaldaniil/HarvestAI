@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -23,8 +23,14 @@ import {
   useRequestHeatmap,
   useTrackObservationJob,
 } from "@/hooks/useObservations";
+import { useChatStore } from "@/stores/chatStore";
 import { IndexChart } from "./IndexChart";
 import { PredictionCard } from "./PredictionCard";
+
+// Heights match the Tailwind classes used on the panel container:
+// `h-12` (3rem = 48px) when collapsed, `h-[340px]` when expanded.
+const PANEL_HEIGHT_EXPANDED = 340;
+const PANEL_HEIGHT_COLLAPSED = 48;
 
 const INDICES: IndexName[] = ["ndvi", "evi", "ndwi", "savi"];
 
@@ -53,6 +59,15 @@ export function BottomPanel({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // Reserve enough space so the FloatingChatButton (rendered globally in
+  // AppShell) lifts itself above this panel. Cleanup resets to 0 — covers
+  // unmount when the user deselects the field or navigates away.
+  const setBottomReserveHeight = useChatStore((s) => s.setBottomReserveHeight);
+  useEffect(() => {
+    setBottomReserveHeight(collapsed ? PANEL_HEIGHT_COLLAPSED : PANEL_HEIGHT_EXPANDED);
+    return () => setBottomReserveHeight(0);
+  }, [collapsed, setBottomReserveHeight]);
 
   const obsQuery = useObservations(field.id);
   const refreshMut = useRefreshObservations();

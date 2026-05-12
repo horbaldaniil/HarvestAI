@@ -82,6 +82,24 @@
   image-rendering: crisp-edges;
 }
 
+/* Soften the Leaflet attribution control: keep the tile-provider credits
+   (required by OSM ODbL + CartoDB ToS) but make them visually quiet so
+   they don't draw the eye away from the map content. The `prefix={false}`
+   on the AttributionControl strips the "Leaflet |" intro separately. */
+.leaflet-control-attribution {
+  font-size: 9px;
+  opacity: 0.55;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 0 4px;
+  transition: opacity 0.15s ease;
+}
+.leaflet-control-attribution:hover {
+  opacity: 1;
+}
+.leaflet-control-attribution a {
+  color: hsl(var(--muted-foreground));
+}
+
 /* Lightweight markdown styling for chat-bot messages. We don't pull in
    `@tailwindcss/typography` because it adds ~30 KB for an effect we use
    in exactly one place — assistant bubbles in the chat panel. */

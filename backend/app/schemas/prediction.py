@@ -66,6 +66,11 @@ class WeatherDayRead(BaseModel):
     precip_mm: float | None
     humidity_pct: float | None
     radiation_mj: float | None
+    # Week 8 — extra metrics powering the dedicated /weather page. Older
+    # cached rows have NULL here; the UI degrades gracefully.
+    wind_speed_max_ms: float | None = None
+    cloud_cover_pct: float | None = None
+    soil_moisture_0_10cm: float | None = None
     is_forecast: bool
 
 
@@ -84,6 +89,7 @@ class DashboardKpis(BaseModel):
     total_area_ha: float
     predicted_total_yield_t: float | None
     avg_ndvi_current: float | None
+    avg_ndwi_current: float | None = None  # Week 7: portfolio-wide moisture proxy
     active_alerts_count: int
 
 
@@ -93,11 +99,75 @@ class DashboardFieldRow(BaseModel):
     crop_type: str
     area_ha: float
     current_ndvi: float | None
+    current_ndwi: float | None = None
     predicted_tha: float | None
     has_alerts: bool
+    # Composite 0–100 risk score (higher = worse) plus the contributing
+    # factors as short tags so the UI can show a tooltip.
+    risk_score: int = 0
+    risk_factors: list[str] = []
+    # Optional oblast-level NDVI mean used for the "your field vs oblast"
+    # comparison column. Present only when training_set_v2 covers this oblast.
+    oblast_avg_ndvi: float | None = None
+    # GeoJSON Polygon for the mini-map on the dashboard. Allows the UI to
+    # render all fields in one round-trip without hitting /api/fields.
+    geometry: dict | None = None
+
+
+class BestWorstField(BaseModel):
+    """Highlight cards: top NDVI performer + most-at-risk field."""
+    field_id: int
+    name: str
+    crop_type: str
+    current_ndvi: float | None
+    predicted_tha: float | None
+    risk_score: int = 0
+    reason: str  # short human-readable explanation
+
+
+class CropBreakdownItem(BaseModel):
+    crop_type: str
+    field_count: int
+    area_ha: float
+
+
+class FieldYoYDelta(BaseModel):
+    """One row in the dashboard's "Top-3 NDVI movers" card. Replaces the
+    legacy portfolio-average YoY widget — names a specific field, shows
+    a signed % delta, and lets the UI link straight to the field page."""
+    field_id: int
+    name: str
+    crop_type: str
+    current_year_ndvi: float
+    prev_year_ndvi: float
+    diff_pct: float
+
+
+class FieldWeather(BaseModel):
+    """Per-field 7-day weather summary. Replaces the old averaged
+    `WeatherSummary` — much clearer where "this weather" applies, especially
+    when fields are spread across oblasts."""
+    field_id: int
+    field_name: str
+    centroid_lat: float | None
+    centroid_lon: float | None
+    days: list[WeatherDayRead] = []
+    temp_max_7d: float | None = None
+    precip_sum_7d: float | None = None
+    heat_stress_days_7d: int = 0
 
 
 class DashboardResponse(BaseModel):
     kpis: DashboardKpis
     fields: list[DashboardFieldRow]
     yoy: YearOverYear
+    # Top-3 fields with the biggest |YoY% change|. Replaces the
+    # portfolio-average YoY widget.
+    top_movers: list[FieldYoYDelta] = []
+    best_field: BestWorstField | None = None
+    worst_field: BestWorstField | None = None
+    crops_breakdown: list[CropBreakdownItem] = []
+    # Per-field 7-day forecast list; UI picks one via dropdown.
+    weather_by_field: list[FieldWeather] = []
+    # Echo back what filters were applied so the UI can verify state.
+    applied_crops: list[str] = []

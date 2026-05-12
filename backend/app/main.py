@@ -20,6 +20,7 @@ from app.routers import observations as observations_router
 from app.routers import predictions as predictions_router
 from app.routers import quota as quota_router
 from app.routers import reports as reports_router
+from app.routers import settings as settings_router
 from app.routers import weather as weather_router
 
 logging.basicConfig(
@@ -75,6 +76,7 @@ app.include_router(quota_router.router)
 app.include_router(chat_router.router)
 app.include_router(reports_router.router)
 app.include_router(methodology_router.router)
+app.include_router(settings_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

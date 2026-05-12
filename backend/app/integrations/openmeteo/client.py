@@ -29,7 +29,9 @@ log = logging.getLogger(__name__)
 HISTORICAL_URL = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
-# Daily-aggregated variables we ask Open-Meteo to return.
+# Daily-aggregated variables we ask Open-Meteo to return. The first six
+# feed the ML pipeline + dashboard KPIs; the last three (wind, cloud,
+# soil moisture) drive the dedicated /weather page (Week 8).
 DAILY_VARS: tuple[str, ...] = (
     "temperature_2m_max",
     "temperature_2m_min",
@@ -37,6 +39,9 @@ DAILY_VARS: tuple[str, ...] = (
     "precipitation_sum",
     "relative_humidity_2m_mean",
     "shortwave_radiation_sum",
+    "wind_speed_10m_max",
+    "cloud_cover_mean",
+    "soil_moisture_0_to_10cm_mean",
 )
 
 
@@ -49,6 +54,11 @@ class DailyWeather:
     precip_mm: float | None
     humidity_pct: float | None
     radiation_mj: float | None
+    # Week 8 fields — all optional so older cached rows that predate the
+    # columns still parse cleanly.
+    wind_speed_max_ms: float | None = None
+    cloud_cover_pct: float | None = None
+    soil_moisture_0_10cm: float | None = None
 
 
 class OpenMeteoError(RuntimeError):
@@ -118,6 +128,9 @@ def _parse_daily(payload: dict) -> list[DailyWeather]:
     precip = daily.get("precipitation_sum") or []
     humid = daily.get("relative_humidity_2m_mean") or []
     rad = daily.get("shortwave_radiation_sum") or []
+    wind = daily.get("wind_speed_10m_max") or []
+    cloud = daily.get("cloud_cover_mean") or []
+    soil = daily.get("soil_moisture_0_to_10cm_mean") or []
 
     for i, day in enumerate(dates):
         try:
@@ -133,6 +146,9 @@ def _parse_daily(payload: dict) -> list[DailyWeather]:
                 precip_mm=_safe_float(precip, i),
                 humidity_pct=_safe_float(humid, i),
                 radiation_mj=_safe_float(rad, i),
+                wind_speed_max_ms=_safe_float(wind, i),
+                cloud_cover_pct=_safe_float(cloud, i),
+                soil_moisture_0_10cm=_safe_float(soil, i),
             )
         )
     return result

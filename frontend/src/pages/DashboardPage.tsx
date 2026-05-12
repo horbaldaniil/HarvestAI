@@ -6,37 +6,41 @@ import { uk } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  ArrowDownRight,
-  ArrowUpRight,
   Bell,
   Download,
+  Droplets,
+  Eye,
+  EyeOff,
   Leaf,
   Loader2,
-  Minus,
   Sprout,
   TrendingUp,
 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
+import { BestWorstCards } from "@/components/dashboard/BestWorstCards";
+import { CropCalendarTimeline } from "@/components/dashboard/CropCalendarTimeline";
+import { DashboardMap } from "@/components/dashboard/DashboardMap";
+import { FilterBar } from "@/components/dashboard/FilterBar";
+import { IncomeProjectionCard } from "@/components/dashboard/IncomeProjectionCard";
+import { OblastComparisonTable } from "@/components/dashboard/OblastComparisonTable";
+import { TopMoversCard } from "@/components/dashboard/TopMoversCard";
+import { WeatherSummaryCard } from "@/components/dashboard/WeatherSummaryCard";
 import { useDashboard } from "@/hooks/useDashboard";
 import { useAlerts, useAcknowledgeAlert } from "@/hooks/useAlerts";
 import { downloadPortfolioReport, triggerBrowserDownload } from "@/api/reports";
 import { CROP_COLORS } from "@/lib/colors";
 import { cn } from "@/lib/utils";
-import type { DashboardFieldRow, YearOverYear as YoYType } from "@/api/dashboard";
+import type { CropType, DashboardFieldRow } from "@/api/dashboard";
 
 export function DashboardPage() {
   const { t } = useTranslation();
-  const { data, isLoading } = useDashboard();
+  const [selectedCrops, setSelectedCrops] = useState<CropType[]>([]);
+  const { data, isLoading } = useDashboard({ crops: selectedCrops });
   const [exporting, setExporting] = useState(false);
 
   if (isLoading || !data) {
@@ -49,7 +53,7 @@ export function DashboardPage() {
     );
   }
 
-  const { kpis, fields, yoy } = data;
+  const { kpis, fields, top_movers, best_field, worst_field, weather_by_field, yoy } = data;
 
   const handleExport = async () => {
     setExporting(true);
@@ -68,9 +72,11 @@ export function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <header className="flex items-start justify-between gap-4">
+        <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">{t("dashboard.title")}</h1>
+            <h1 className="text-3xl font-bold tracking-tight">
+              {t("dashboard.title")}
+            </h1>
             <p className="text-muted-foreground">{t("app.tagline")}</p>
           </div>
           <Button onClick={handleExport} disabled={exporting} variant="outline">
@@ -83,8 +89,16 @@ export function DashboardPage() {
           </Button>
         </header>
 
+        <FilterBar
+          selectedCrops={selectedCrops}
+          onCropsChange={setSelectedCrops}
+        />
+
+        {/* Hero mini-map: every field polygon coloured by latest NDVI */}
+        <DashboardMap fields={fields} />
+
         {/* KPI cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <KpiCard
             label={t("dashboardKpi.totalFields")}
             value={kpis.total_fields.toString()}
@@ -105,6 +119,15 @@ export function DashboardPage() {
             icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
           />
           <KpiCard
+            label="Середній NDWI"
+            value={
+              kpis.avg_ndwi_current !== null
+                ? kpis.avg_ndwi_current.toFixed(2)
+                : "—"
+            }
+            icon={<Droplets className="h-5 w-5 text-blue-600" />}
+          />
+          <KpiCard
             label={t("dashboardKpi.activeAlerts")}
             value={kpis.active_alerts_count.toString()}
             icon={
@@ -121,7 +144,15 @@ export function DashboardPage() {
           />
         </div>
 
-        {/* Fields table + Year-over-Year side-by-side */}
+        {/* Best/Worst + Income */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <BestWorstCards best={best_field} worst={worst_field} />
+          </div>
+          <IncomeProjectionCard fields={fields} />
+        </div>
+
+        {/* Fields table + Top movers + Weather */}
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <CardHeader>
@@ -132,20 +163,16 @@ export function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("dashboardYoY.title")}</CardTitle>
-              <CardDescription>
-                {yoy.current_year}
-                {yoy.prev_year_avg_ndvi !== null
-                  ? ` vs ${yoy.current_year - 1}`
-                  : ""}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <YearOverYearWidget yoy={yoy} />
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <TopMoversCard movers={top_movers} currentYear={yoy.current_year} />
+            <WeatherSummaryCard weatherByField={weather_by_field} />
+          </div>
+        </div>
+
+        {/* Oblast comparison + Crop calendar */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <OblastComparisonTable fields={fields} />
+          <CropCalendarTimeline breakdown={data.crops_breakdown} />
         </div>
 
         {/* Recent alerts */}
@@ -214,6 +241,7 @@ function FieldsTable({ fields }: { fields: DashboardFieldRow[] }) {
             <th className="px-2 py-2 text-right font-medium">
               {t("dashboardTable.predicted")}
             </th>
+            <th className="px-2 py-2 text-right font-medium">Risk</th>
             <th className="px-2 py-2 font-medium">{t("dashboardTable.status")}</th>
           </tr>
         </thead>
@@ -243,6 +271,9 @@ function FieldsTable({ fields }: { fields: DashboardFieldRow[] }) {
               <td className="px-2 py-2 text-right tabular-nums">
                 {f.predicted_tha !== null ? `${f.predicted_tha.toFixed(1)} т/га` : "—"}
               </td>
+              <td className="px-2 py-2 text-right tabular-nums">
+                <RiskBadge score={f.risk_score} factors={f.risk_factors} />
+              </td>
               <td className="px-2 py-2">
                 {f.has_alerts ? (
                   <Badge variant="destructive" className="font-normal">
@@ -262,116 +293,156 @@ function FieldsTable({ fields }: { fields: DashboardFieldRow[] }) {
   );
 }
 
-function YearOverYearWidget({ yoy }: { yoy: YoYType }) {
-  const { t } = useTranslation();
-  const hasPrev = yoy.prev_year_avg_ndvi !== null;
+function RiskBadge({ score, factors }: { score: number; factors: string[] }) {
+  const tier =
+    score >= 50 ? "critical" : score >= 25 ? "warning" : "ok";
+  const colour = {
+    critical: "text-red-700 bg-red-50 border-red-200",
+    warning: "text-amber-700 bg-amber-50 border-amber-200",
+    ok: "text-emerald-700 bg-emerald-50 border-emerald-200",
+  }[tier];
+  const tierLabel = {
+    critical: "Високий ризик",
+    warning: "Помірний ризик",
+    ok: "Низький ризик",
+  }[tier];
+  const tierEmoji = { critical: "🔴", warning: "🟡", ok: "🟢" }[tier];
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <span className="text-xs text-muted-foreground">{t("dashboardYoY.current")}</span>
-        <span className="text-2xl font-bold tabular-nums">
-          {yoy.current_year_avg_ndvi !== null
-            ? yoy.current_year_avg_ndvi.toFixed(2)
-            : "—"}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "inline-block cursor-help rounded border px-1.5 py-0.5 text-xs tabular-nums",
+            colour,
+          )}
+          // onClick stops table-row navigation when the user just wants the tooltip.
+          onClick={(e) => e.stopPropagation()}
+        >
+          {score}
         </span>
-      </div>
-      {hasPrev ? (
-        <>
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs text-muted-foreground">{t("dashboardYoY.previous")}</span>
-            <span className="text-lg tabular-nums text-muted-foreground">
-              {(yoy.prev_year_avg_ndvi ?? 0).toFixed(2)}
+      </TooltipTrigger>
+      <TooltipContent side="top" align="end" className="w-64">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between font-semibold">
+            <span>
+              {tierEmoji} {tierLabel}
+            </span>
+            <span className="tabular-nums text-muted-foreground">
+              {score} / 100
             </span>
           </div>
-          <div className="flex items-center justify-between border-t pt-2">
-            <span className="text-xs text-muted-foreground">{t("dashboardYoY.diff")}</span>
-            <DiffIndicator pct={yoy.diff_pct ?? 0} />
-          </div>
-        </>
-      ) : (
-        <p className="text-xs text-muted-foreground">{t("dashboardYoY.noPrevYear")}</p>
-      )}
-    </div>
-  );
-}
-
-function DiffIndicator({ pct }: { pct: number }) {
-  if (Math.abs(pct) < 0.5) {
-    return (
-      <div className="flex items-center gap-1 text-muted-foreground">
-        <Minus className="h-4 w-4" />
-        <span className="tabular-nums">0.0%</span>
-      </div>
-    );
-  }
-  const positive = pct > 0;
-  const Icon = positive ? ArrowUpRight : ArrowDownRight;
-  const color = positive ? "text-emerald-600" : "text-red-600";
-  return (
-    <div className={cn("flex items-center gap-1 font-medium", color)}>
-      <Icon className="h-4 w-4" />
-      <span className="tabular-nums">
-        {positive ? "+" : ""}
-        {pct.toFixed(1)}%
-      </span>
-    </div>
+          {factors.length > 0 ? (
+            <ul className="space-y-1 border-t pt-1.5 text-[11px] leading-tight">
+              {factors.map((f, i) => (
+                <li key={i} className="flex items-start gap-1.5">
+                  <span className="mt-0.5 text-amber-500">•</span>
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="border-t pt-1.5 text-[11px] text-muted-foreground">
+              Без помітних ризиків — поле в нормі.
+            </p>
+          )}
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
 function RecentAlertsList() {
   const { t } = useTranslation();
-  const { data: alerts, isLoading } = useAlerts(false);
+  const navigate = useNavigate();
+  const [showAcknowledged, setShowAcknowledged] = useState(false);
+  const { data: alerts, isLoading } = useAlerts(showAcknowledged);
   const ack = useAcknowledgeAlert();
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-6">
-        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-      </div>
-    );
-  }
-  if (!alerts || alerts.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 py-6">
-        <AlertTriangle className="h-6 w-6 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">{t("alertsUi.empty")}</span>
-      </div>
-    );
-  }
   return (
     <div className="space-y-2">
-      {alerts.slice(0, 5).map((a) => (
-        <div
-          key={a.id}
-          className="flex items-start gap-2 rounded-md border p-2 text-sm"
+      <div className="flex items-center justify-end pb-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => setShowAcknowledged((s) => !s)}
         >
-          <Badge
-            variant={a.severity === "critical" ? "destructive" : "secondary"}
-            className="text-[10px] font-normal"
-          >
-            {t(`alertsUi.severity.${a.severity}`)}
-          </Badge>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-2">
-              {a.field_name && (
-                <span className="truncate text-xs font-medium">{a.field_name}</span>
-              )}
-              <span className="text-[10px] text-muted-foreground">
-                {format(new Date(a.created_at), "d MMM HH:mm", { locale: uk })}
-              </span>
-            </div>
-            <div className="mt-0.5 text-xs leading-tight">{a.message_uk}</div>
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => void ack.mutateAsync(a.id)}
-            className="h-7 text-xs"
-          >
-            ✓
-          </Button>
+          {showAcknowledged ? (
+            <>
+              <EyeOff className="h-3.5 w-3.5" />
+              Непрочитані
+            </>
+          ) : (
+            <>
+              <Eye className="h-3.5 w-3.5" />
+              Показати прочитані
+            </>
+          )}
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-6">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
         </div>
-      ))}
+      ) : !alerts || alerts.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <AlertTriangle className="h-6 w-6 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">
+            {showAcknowledged
+              ? "Прочитаних сповіщень немає"
+              : t("alertsUi.empty")}
+          </span>
+        </div>
+      ) : (
+        alerts.slice(0, 10).map((a) => (
+          <div
+            key={a.id}
+            className={cn(
+              "flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm hover:bg-accent/30",
+              a.acknowledged && "opacity-60",
+            )}
+            onClick={() => {
+              if (a.field_id) navigate(`/fields?selected=${a.field_id}`);
+            }}
+          >
+            <Badge
+              variant={a.severity === "critical" ? "destructive" : "secondary"}
+              className="text-[10px] font-normal"
+            >
+              {t(`alertsUi.severity.${a.severity}`)}
+            </Badge>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                {a.field_name && (
+                  <span className="truncate text-xs font-medium">
+                    {a.field_name}
+                  </span>
+                )}
+                <span className="text-[10px] text-muted-foreground">
+                  {format(new Date(a.created_at), "d MMM HH:mm", { locale: uk })}
+                </span>
+              </div>
+              <div className="mt-0.5 text-xs leading-tight">{a.message_uk}</div>
+            </div>
+            {!a.acknowledged && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void ack.mutateAsync(a.id);
+                }}
+                className="h-7 w-7 flex-shrink-0"
+                title="Позначити прочитаним"
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        ))
+      )}
     </div>
   );
 }

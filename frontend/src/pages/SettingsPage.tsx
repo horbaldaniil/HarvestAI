@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccountCard } from "@/components/settings/AccountCard";
+import { CropPricesCard } from "@/components/settings/CropPricesCard";
 import { QuotaCard } from "@/components/settings/QuotaCard";
 
 export function SettingsPage() {
@@ -14,6 +15,7 @@ export function SettingsPage() {
         <div className="grid gap-4 md:grid-cols-2">
           <AccountCard />
           <QuotaCard />
+          <CropPricesCard />
         </div>
       </div>
     </AppShell>

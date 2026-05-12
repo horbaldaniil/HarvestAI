@@ -18,6 +18,16 @@ const uk = {
       retry: "Спробувати знову",
       logout: "Вийти",
       close: "Закрити",
+      clear: "Скинути",
+    },
+    dashboardFilters: {
+      timeRange: "Період",
+      timeRanges: {
+        "30d": "Останні 30 днів",
+        "90d": "Останні 90 днів",
+        year: "Рік",
+      },
+      crops: "Культури",
     },
     chat: {
       title: "AI-помічник",
@@ -69,6 +79,7 @@ const uk = {
     nav: {
       dashboard: "Дашборд",
       fields: "Поля",
+      weather: "Погода",
       chat: "AI-помічник",
       reports: "Звіти",
       methodology: "Методологія",

@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import BigInteger
-from sqlalchemy.dialects.postgresql import CITEXT
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 
@@ -34,6 +34,13 @@ def _compile_citext_sqlite(type_, compiler, **kw):  # noqa: D401
 def _compile_bigint_sqlite(type_, compiler, **kw):  # noqa: D401
     """SQLite auto-increments only on INTEGER PRIMARY KEY, not BIGINT."""
     return "INTEGER"
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(type_, compiler, **kw):  # noqa: D401
+    """SQLite has no JSONB — fall back to TEXT. Reads/writes still work
+    because SQLAlchemy serialises dicts as JSON strings."""
+    return "TEXT"
 
 
 @pytest.fixture(scope="session")

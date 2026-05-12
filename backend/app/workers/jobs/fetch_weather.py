@@ -76,6 +76,9 @@ def _upsert(session: Session, field_id: int, rows, *, is_forecast: bool) -> None
             precip_mm=r.precip_mm,
             humidity_pct=r.humidity_pct,
             radiation_mj=r.radiation_mj,
+            wind_speed_max_ms=r.wind_speed_max_ms,
+            cloud_cover_pct=r.cloud_cover_pct,
+            soil_moisture_0_10cm=r.soil_moisture_0_10cm,
             is_forecast=is_forecast,
         )
         stmt = stmt.on_conflict_do_update(
@@ -87,6 +90,9 @@ def _upsert(session: Session, field_id: int, rows, *, is_forecast: bool) -> None
                 "precip_mm": stmt.excluded.precip_mm,
                 "humidity_pct": stmt.excluded.humidity_pct,
                 "radiation_mj": stmt.excluded.radiation_mj,
+                "wind_speed_max_ms": stmt.excluded.wind_speed_max_ms,
+                "cloud_cover_pct": stmt.excluded.cloud_cover_pct,
+                "soil_moisture_0_10cm": stmt.excluded.soil_moisture_0_10cm,
                 "is_forecast": stmt.excluded.is_forecast,
                 "updated_at": datetime.now(UTC),
             },

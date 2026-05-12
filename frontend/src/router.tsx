@@ -7,6 +7,7 @@ import { FieldsPage } from "@/pages/FieldsPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { MethodologyPage } from "@/pages/MethodologyPage";
+import { WeatherPage } from "@/pages/WeatherPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
@@ -43,6 +44,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <ReportsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/weather",
+    element: (
+      <ProtectedRoute>
+        <WeatherPage />
       </ProtectedRoute>
     ),
   },

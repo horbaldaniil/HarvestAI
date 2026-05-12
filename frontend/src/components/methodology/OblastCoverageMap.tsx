@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { GeoJSON, MapContainer, TileLayer } from "react-leaflet";
+import { AttributionControl, GeoJSON, MapContainer, TileLayer } from "react-leaflet";
 import type { Feature, FeatureCollection } from "geojson";
 
 import { useCoverage } from "@/hooks/useMethodology";
@@ -72,7 +72,9 @@ export function OblastCoverageMap() {
             zoom={6}
             style={{ height: "100%", width: "100%" }}
             scrollWheelZoom={false}
+            attributionControl={false}
           >
+            <AttributionControl prefix={false} position="bottomright" />
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
               attribution='&copy; <a href="https://carto.com/">CartoDB</a> &copy; OpenStreetMap'

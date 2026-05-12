@@ -1,5 +1,10 @@
 import { type ReactNode } from "react";
-import { LayersControl, MapContainer, TileLayer } from "react-leaflet";
+import {
+  AttributionControl,
+  LayersControl,
+  MapContainer,
+  TileLayer,
+} from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import { useTranslation } from "react-i18next";
 
@@ -29,7 +34,12 @@ export function FieldMap({
       className={className ?? "h-full w-full"}
       scrollWheelZoom
       worldCopyJump
+      // Disable the default attribution control so we can replace it with
+      // one that drops the "Leaflet |" prefix while keeping the tile-
+      // provider credits (required by OSM ODbL + CartoDB ToS).
+      attributionControl={false}
     >
+      <AttributionControl prefix={false} position="bottomright" />
       <LayersControl position="topright">
         <LayersControl.BaseLayer checked name={t("map.baseLayer.osm")}>
           <TileLayer

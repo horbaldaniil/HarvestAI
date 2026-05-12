@@ -37,5 +37,9 @@ class WeatherObservation(Base, TimestampMixin):
     precip_mm: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
     humidity_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     radiation_mj: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    # Migration 0008 — extra fields for the dedicated /weather page.
+    wind_speed_max_ms: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    cloud_cover_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    soil_moisture_0_10cm: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
     # is_forecast=true rows live in the 14-day future window
     is_forecast: Mapped[bool] = mapped_column(default=False, nullable=False)

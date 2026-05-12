@@ -16,11 +16,18 @@ interface ChatStore {
    * "Templates" tab in /chat: one click → new session → answer streaming.
    */
   pendingPrompt: string | null;
+  /**
+   * Pixels reserved by another fixed-bottom UI element (BottomPanel on
+   * /fields, future docked modals, etc.). The FloatingChatButton lifts
+   * itself above this so it doesn't sit on top of in-page controls.
+   */
+  bottomReserveHeight: number;
   open: () => void;
   close: () => void;
   toggle: () => void;
   setActiveSession: (id: number | null) => void;
   setContextField: (id: number | null) => void;
+  setBottomReserveHeight: (h: number) => void;
   /**
    * Open the panel, start a new session, and auto-send `prompt`. Existing
    * conversation is preserved — we just create a new session alongside.
@@ -34,11 +41,13 @@ export const useChatStore = create<ChatStore>((set) => ({
   activeSessionId: null,
   contextFieldId: null,
   pendingPrompt: null,
+  bottomReserveHeight: 0,
   open: () => set({ isOpen: true }),
   close: () => set({ isOpen: false }),
   toggle: () => set((s) => ({ isOpen: !s.isOpen })),
   setActiveSession: (id) => set({ activeSessionId: id }),
   setContextField: (id) => set({ contextFieldId: id }),
+  setBottomReserveHeight: (h) => set({ bottomReserveHeight: Math.max(0, h) }),
   openWithPrompt: (prompt) =>
     set({
       isOpen: true,
