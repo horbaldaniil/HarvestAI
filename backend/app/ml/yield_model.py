@@ -74,11 +74,15 @@ def predict_yield(session: Session, field_id: int, crop: CropType) -> YieldPredi
     else:
         confidence = None
 
+    # Identify algorithm family from the loaded payload — registry now keeps
+    # xgboost / rf alongside each other. Falls back to xgb for older payloads.
+    model_class = type(payload["model"]).__name__.lower()
+    family = "rf" if "forest" in model_class else "xgb"
     return YieldPrediction(
         value_tha=round(value, 2),
         confidence=confidence,
         features=features,
         shap_top=shap_top,
-        model_name=f"yield_xgb_{crop.value}",
+        model_name=f"yield_{family}_{crop.value}",
         model_version=payload.get("version", "v1"),
     )

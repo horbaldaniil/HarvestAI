@@ -60,11 +60,19 @@ backend/models/*
 backend/data/raw/*
 !backend/data/raw/.gitkeep
 !backend/data/raw/usda_ukraine_yield_2017_2023.csv
+!backend/data/raw/ukraine_oblasts.geojson
+# Cropland mask is large (150-700 MB depending on source) — gitignored.
+# Reproducible via backend/scripts/download_cropland_mask.py
 backend/data/processed/*
 !backend/data/processed/.gitkeep
 !backend/data/processed/seasonal_norms.json
+!backend/data/processed/oblast_samples.geojson
+!backend/data/processed/model_metrics_v2.json
+!backend/data/processed/training_set_v2.parquet
+# Raw S2 observations is large (~5 MB) — gitignored. Reproducible via
+# notebook 05_collect_oblast_s2.ipynb.
 backend/notebooks/.ipynb_checkpoints/
-*.pt
+!backend/models/yield_*.pt
 *.onnx
 *.pkl
 *.h5

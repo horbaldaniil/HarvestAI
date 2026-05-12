@@ -71,6 +71,7 @@ const uk = {
       fields: "Поля",
       chat: "AI-помічник",
       reports: "Звіти",
+      methodology: "Методологія",
       settings: "Налаштування",
     },
     dashboard: {

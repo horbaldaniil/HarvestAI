@@ -37,7 +37,12 @@ dependencies = [
     "xgboost>=2.1.2",
     "rasterio>=1.4.2",
     "shapely>=2.0.6",
+    "geopandas>=1.0.1",  # Week 6: cropland-mask geom operations
+    "pyarrow>=18.0.0",  # Week 6: parquet for oblast_s2_observations
     "joblib>=1.4.2",
+    # Torch (CPU-only). LSTM yield model for the magistr methods chapter.
+    # Pinned to CPU build to avoid bundling 2+ GB of CUDA on Windows dev boxes.
+    "torch>=2.2.0",
     # ─── External APIs ───────────────────────────────
     "openai>=1.54.0",
     "httpx>=0.27.2",

@@ -15,6 +15,7 @@ from app.routers import chat as chat_router
 from app.routers import dashboard as dashboard_router
 from app.routers import fields as fields_router
 from app.routers import jobs as jobs_router
+from app.routers import methodology as methodology_router
 from app.routers import observations as observations_router
 from app.routers import predictions as predictions_router
 from app.routers import quota as quota_router
@@ -73,6 +74,7 @@ app.include_router(jobs_router.router)
 app.include_router(quota_router.router)
 app.include_router(chat_router.router)
 app.include_router(reports_router.router)
+app.include_router(methodology_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

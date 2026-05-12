@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # Soft rate-limit per user, rolling 1-hour window. Set to 0 to disable.
     chat_rate_limit_per_hour: int = 20
 
+    # ─── ML — Week 6 ────────────────────────────────────────────
+    # Pin a specific algorithm family (xgboost / rf / lstm). Default empty =
+    # registry picks the best available per crop (xgb v2 → v1 → rf v1).
+    active_model_family: str = ""
+
     # ─── OpenWeather ────────────────────────────────────────────
     openweather_api_key: str = ""
 

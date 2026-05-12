@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { LayoutDashboard, Map, MessageSquare, FileText, Settings, LogOut } from "lucide-react";
+import { BookOpen, LayoutDashboard, Map, MessageSquare, FileText, Settings, LogOut } from "lucide-react";
 
 import { AlertsBell } from "@/components/alerts/AlertsBell";
 import { ChatPanel } from "@/components/chat/ChatPanel";
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: "/fields", labelKey: "nav.fields", icon: Map },
   { to: "/chat", labelKey: "nav.chat", icon: MessageSquare },
   { to: "/reports", labelKey: "nav.reports", icon: FileText },
+  { to: "/methodology", labelKey: "nav.methodology", icon: BookOpen },
   { to: "/settings", labelKey: "nav.settings", icon: Settings },
 ] as const;
 
