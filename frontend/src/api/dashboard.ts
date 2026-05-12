@@ -24,7 +24,9 @@ export interface DashboardFieldRow {
   has_alerts: boolean;
   risk_score: number;
   risk_factors: string[];
+  oblast_name: string | null;
   oblast_avg_ndvi: number | null;
+  oblast_baseline_year: number | null;
   geometry: GJPolygon | null;
 }
 

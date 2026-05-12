@@ -41,7 +41,10 @@ from app.schemas.prediction import (
 )
 from app.services.dashboard_analytics import (
     compute_risk_score,
+    find_oblast_for_centroid,
     oblast_avg_ndvi,
+    oblast_baseline_year,
+    oblast_name_uk,
     pick_best_worst,
 )
 
@@ -203,8 +206,19 @@ async def get_dashboard(
             if w.temp_max_c is not None and float(w.temp_max_c) > 30.0
         )
 
-        # Oblast comparison via Week 6 parquet (None if not yet generated).
-        oblast_baseline = oblast_avg_ndvi(None, current_year)
+        # Oblast comparison: resolve the field's oblast from its centroid
+        # via point-in-polygon over ukraine_oblasts.geojson, then look up
+        # the Week 6 baseline NDVI for that oblast. Falls back to None when:
+        #   - oblast geojson is missing,
+        #   - centroid lands outside Ukraine,
+        #   - training_set_v2.parquet doesn't have data for that oblast yet.
+        centroid_latlon = _field_centroid(f)
+        oblast_english = (
+            find_oblast_for_centroid(*centroid_latlon)
+            if centroid_latlon is not None else None
+        )
+        oblast_baseline = oblast_avg_ndvi(oblast_english, current_year)
+        oblast_yr = oblast_baseline_year(oblast_english) if oblast_baseline is not None else None
 
         risk_score, risk_factors = compute_risk_score(
             current_ndvi=current_ndvi,
@@ -230,7 +244,9 @@ async def get_dashboard(
             "has_alerts": has_alerts,
             "risk_score": risk_score,
             "risk_factors": risk_factors,
+            "oblast_name": oblast_name_uk(oblast_english),
             "oblast_avg_ndvi": round(oblast_baseline, 3) if oblast_baseline is not None else None,
+            "oblast_baseline_year": oblast_yr,
             "geometry": _field_polygon_geojson(f),
         }
         field_rows.append(DashboardFieldRow(**row_dict))

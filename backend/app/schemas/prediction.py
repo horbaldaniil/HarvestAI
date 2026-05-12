@@ -106,9 +106,15 @@ class DashboardFieldRow(BaseModel):
     # factors as short tags so the UI can show a tooltip.
     risk_score: int = 0
     risk_factors: list[str] = []
+    # Resolved oblast (Ukrainian display name) the field's centroid lands in.
+    # None if the centroid is outside Ukraine or the oblast geojson is missing.
+    oblast_name: str | None = None
     # Optional oblast-level NDVI mean used for the "your field vs oblast"
     # comparison column. Present only when training_set_v2 covers this oblast.
     oblast_avg_ndvi: float | None = None
+    # Which year the baseline NDVI was sourced from (most-recent year in
+    # the Week 6 parquet). Lets the UI label the comparison honestly.
+    oblast_baseline_year: int | None = None
     # GeoJSON Polygon for the mini-map on the dashboard. Allows the UI to
     # render all fields in one round-trip without hitting /api/fields.
     geometry: dict | None = None
