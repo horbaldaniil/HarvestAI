@@ -1,7 +1,46 @@
 import type { Polygon as GJPolygon, Point as GJPoint } from "geojson";
 import { api } from "./client";
 
-export type CropType = "wheat" | "corn" | "sunflower";
+export type CropType =
+  | "wheat"
+  | "corn"
+  | "sunflower"
+  | "soybean"
+  | "rapeseed"
+  | "barley"
+  | "rye"
+  | "oats"
+  | "buckwheat"
+  | "peas"
+  | "sugar_beet"
+  | "potato"
+  | "corn_silage";
+
+/**
+ * Canonical iteration order for the 13 supported crops. Mirrors the
+ * member order of `CropType` in `backend/app/db/models/enums.py` and
+ * drives every crop selector, filter chip and chart axis in the UI.
+ *
+ * Order: original three (wheat/corn/sunflower) — oilseeds — cereals —
+ * legume — root crops — forage. Display groupings match the backend
+ * enum's comment blocks so visual reading order is the same on both
+ * sides of the wire.
+ */
+export const ALL_CROPS: CropType[] = [
+  "wheat",
+  "corn",
+  "sunflower",
+  "soybean",
+  "rapeseed",
+  "barley",
+  "rye",
+  "oats",
+  "buckwheat",
+  "peas",
+  "sugar_beet",
+  "potato",
+  "corn_silage",
+];
 
 export interface FieldRead {
   id: number;

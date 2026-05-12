@@ -16,10 +16,15 @@ interface Props {
  * highlighted with a vertical line so the user sees "where we are now".
  *
  * Phenology dates mirror the static lookup in
- * `app/services/dashboard_analytics.py` — keep in sync if you change one.
+ * `app/services/dashboard_analytics.py` and `app/data_reference/
+ * crop_calendar.py` — keep all three in sync if you change one.
+ * Months are 1-indexed (Jan=1 … Dec=12). Winter crops express the
+ * "Спокій" phase as a wraparound range (start > end means it crosses
+ * the year boundary — see CropRow rendering).
  */
 
 const PHENOLOGY: Record<CropType, Array<{ phase: string; start: number; end: number }>> = {
+  // — Original three (unchanged)
   wheat: [
     { phase: "Посів", start: 9, end: 10 },
     { phase: "Спокій", start: 11, end: 3 },
@@ -41,6 +46,79 @@ const PHENOLOGY: Record<CropType, Array<{ phase: string; start: number; end: num
     { phase: "Цвітіння", start: 7, end: 7 },
     { phase: "Дозрівання", start: 8, end: 8 },
     { phase: "Збір", start: 9, end: 9 },
+  ],
+  // — Oilseeds
+  soybean: [
+    { phase: "Посів", start: 5, end: 5 },
+    { phase: "Ріст", start: 6, end: 6 },
+    { phase: "Цвітіння", start: 7, end: 7 },
+    { phase: "Дозрівання", start: 8, end: 8 },
+    { phase: "Збір", start: 9, end: 9 },
+  ],
+  rapeseed: [
+    // Winter — sown Sep, dormant Oct-Mar, flowers May
+    { phase: "Посів", start: 9, end: 9 },
+    { phase: "Спокій", start: 10, end: 3 },
+    { phase: "Ріст", start: 4, end: 4 },
+    { phase: "Цвітіння", start: 5, end: 5 },
+    { phase: "Дозрівання", start: 6, end: 6 },
+    { phase: "Збір", start: 7, end: 7 },
+  ],
+  // — Cereals
+  barley: [
+    { phase: "Посів", start: 4, end: 4 },
+    { phase: "Ріст", start: 5, end: 5 },
+    { phase: "Цвітіння", start: 6, end: 6 },
+    { phase: "Збір", start: 7, end: 7 },
+  ],
+  rye: [
+    // Winter — sown Oct
+    { phase: "Посів", start: 10, end: 10 },
+    { phase: "Спокій", start: 11, end: 3 },
+    { phase: "Ріст", start: 4, end: 4 },
+    { phase: "Цвітіння", start: 5, end: 5 },
+    { phase: "Дозрівання", start: 6, end: 6 },
+    { phase: "Збір", start: 7, end: 7 },
+  ],
+  oats: [
+    { phase: "Посів", start: 4, end: 4 },
+    { phase: "Ріст", start: 5, end: 5 },
+    { phase: "Цвітіння", start: 6, end: 6 },
+    { phase: "Збір", start: 7, end: 7 },
+  ],
+  buckwheat: [
+    { phase: "Посів", start: 5, end: 5 },
+    { phase: "Ріст", start: 6, end: 6 },
+    { phase: "Цвітіння", start: 7, end: 7 },
+    { phase: "Збір", start: 8, end: 8 },
+  ],
+  // — Legume
+  peas: [
+    { phase: "Посів", start: 4, end: 4 },
+    { phase: "Ріст", start: 5, end: 5 },
+    { phase: "Цвітіння", start: 6, end: 6 },
+    { phase: "Збір", start: 7, end: 7 },
+  ],
+  // — Root crops
+  sugar_beet: [
+    { phase: "Посів", start: 4, end: 4 },
+    { phase: "Ріст", start: 5, end: 7 },
+    { phase: "Дозрівання", start: 8, end: 9 },
+    { phase: "Збір", start: 10, end: 10 },
+  ],
+  potato: [
+    { phase: "Посів", start: 4, end: 4 },
+    { phase: "Ріст", start: 5, end: 6 },
+    { phase: "Цвітіння", start: 7, end: 7 },
+    { phase: "Дозрівання", start: 8, end: 8 },
+    { phase: "Збір", start: 9, end: 9 },
+  ],
+  // — Forage
+  corn_silage: [
+    { phase: "Посів", start: 4, end: 4 },
+    { phase: "Ріст", start: 5, end: 6 },
+    { phase: "Цвітіння", start: 7, end: 7 },
+    { phase: "Збір", start: 8, end: 8 },
   ],
 };
 

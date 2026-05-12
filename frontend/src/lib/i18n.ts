@@ -138,9 +138,21 @@ const uk = {
         failed: "Не вдалося видалити",
       },
       crops: {
+        // Values match `CropType.display_uk` in
+        // backend/app/db/models/enums.py — keep in sync.
         wheat: "Пшениця",
         corn: "Кукурудза",
         sunflower: "Соняшник",
+        soybean: "Соя",
+        rapeseed: "Ріпак",
+        barley: "Ячмінь",
+        rye: "Жито",
+        oats: "Овес",
+        buckwheat: "Гречка",
+        peas: "Горох",
+        sugar_beet: "Цукровий буряк",
+        potato: "Картопля",
+        corn_silage: "Кукурудза на силос",
       },
       actions: {
         focus: "Показати на мапі",

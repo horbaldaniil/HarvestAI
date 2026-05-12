@@ -2,7 +2,12 @@ import type { Polygon as GJPolygon } from "geojson";
 
 import { api } from "./client";
 
-export type CropType = "wheat" | "corn" | "sunflower";
+// Single source of truth lives in `api/fields.ts`. Imported here for
+// use in the interface declarations below and re-exported so the
+// historical `import { CropType } from "@/api/dashboard"` call sites
+// keep working without two parallel declarations drifting apart.
+import type { CropType } from "./fields";
+export type { CropType };
 
 export interface DashboardKpis {
   total_fields: number;

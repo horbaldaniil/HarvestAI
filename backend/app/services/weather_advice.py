@@ -16,6 +16,36 @@ from typing import Literal
 Severity = Literal["info", "warning", "critical"]
 
 
+# Crop-specific heat-stress notes, indexed by `CropType` slug. Each
+# note is keyed to the crop's most temperature-sensitive phenological
+# stage (mostly the flowering window — see
+# `app/data_reference/crop_calendar.py` peak_month). Used by
+# `_heat_rule`; crops not in the dict get the generic warning.
+_HEAT_NOTES: dict[str, str] = {
+    "wheat":       " Для пшениці у фазі цвітіння/наливу зерна (червень) — критично.",
+    "corn":        " Кукурудза витримує краще, але цвітіння (липень) чутливе.",
+    "sunflower":   " Соняшник у фазі цвітіння (липень) чутливий до спеки й посухи.",
+    "soybean":     " Соя у фазі цвітіння (липень) — стрес знижує зав'язування бобів.",
+    "rapeseed":    " Ріпак найчутливіший у травні (цвітіння); пізніше — терпиме.",
+    "barley":      " Ячмінь у фазі колосіння (червень) — критично для маси зерна.",
+    "rye":         " Жито у фазі цвітіння (травень-червень) чутливе до спеки.",
+    "oats":        " Овес у фазі цвітіння (червень) чутливий до високих температур.",
+    "buckwheat":   " Гречка у фазі цвітіння (липень) — T > 30°C припиняє запилення.",
+    "peas":        " Горох у фазі цвітіння (червень) — критично.",
+    "sugar_beet":  " Цукровий буряк у серпні-вересні — критичний період накопичення сахарози.",
+    "potato":      " Картопля у фазі бульбоутворення (липень-серпень) чутлива до водного стресу.",
+    "corn_silage": " Кукурудза на силос у фазі наливу зерна (липень-серпень) чутлива.",
+}
+
+# Spring/summer crops with frost-sensitive sprouts or flowering
+# windows — emit an extra advisory line in `_frost_rule`. Winter
+# crops (wheat, rye, rapeseed) are deliberately omitted because
+# their below-freezing dormancy is normal.
+_FROST_SENSITIVE_CROPS: frozenset[str] = frozenset({
+    "corn", "sunflower", "soybean", "buckwheat", "potato", "corn_silage",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class WeatherAdvice:
     severity: Severity
@@ -83,11 +113,7 @@ def _heat_rule(days: list[dict], *, crop: str | None) -> list[WeatherAdvice]:
         sev = "warning"
     else:
         return []
-    crop_note = ""
-    if crop == "wheat":
-        crop_note = " Для пшениці у фазі цвітіння/наливу зерна — критично."
-    elif crop == "corn":
-        crop_note = " Кукурудза витримує краще, але цвітіння (липень) чутливе."
+    crop_note = _HEAT_NOTES.get(crop or "", "")
     return [WeatherAdvice(
         severity=sev,
         title=f"Очікується {len(hot)} спекотних днів",
@@ -107,7 +133,11 @@ def _frost_rule(days: list[dict], *, crop: str | None) -> list[WeatherAdvice]:
     if not relevant:
         return []
     sev: Severity = "critical" if len(frost) >= 2 else "warning"
-    crop_note = " Сходи й суцвіття дуже вразливі." if crop in {"corn", "sunflower"} else ""
+    crop_note = (
+        " Сходи й суцвіття дуже вразливі."
+        if crop in _FROST_SENSITIVE_CROPS
+        else ""
+    )
     return [WeatherAdvice(
         severity=sev,
         title=f"Ризик заморозків ({len(frost)} ноч.)",

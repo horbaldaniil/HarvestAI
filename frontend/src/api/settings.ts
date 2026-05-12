@@ -2,11 +2,27 @@ import { api } from "./client";
 
 export type Currency = "UAH" | "USD" | "EUR";
 
+/**
+ * One entry per `CropType` slug. `null` = user hasn't set a price.
+ * Order mirrors `ALL_CROPS` in `api/fields.ts` and the
+ * `CropPricesRead` Pydantic schema in `backend/app/routers/settings.py`
+ * — keep all three in sync when adding a 14th crop.
+ */
 export interface CropPrices {
   currency: Currency;
   wheat: number | null;
   corn: number | null;
   sunflower: number | null;
+  soybean: number | null;
+  rapeseed: number | null;
+  barley: number | null;
+  rye: number | null;
+  oats: number | null;
+  buckwheat: number | null;
+  peas: number | null;
+  sugar_beet: number | null;
+  potato: number | null;
+  corn_silage: number | null;
 }
 
 export type CropPricesUpdate = Partial<CropPrices>;

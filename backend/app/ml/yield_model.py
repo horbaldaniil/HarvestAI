@@ -1,11 +1,14 @@
 """Yield prediction service — wraps registry + SHAP into one entry point.
 
 Inference path:
-1. build_feature_vector(field_id) → dict
-2. to_xgb_input(features) → 2-D numpy
-3. registry.get_yield_model(crop).model.predict(arr) → scalar
-4. registry.get_shap_explainer(crop)(arr) → shap.Explanation
-5. top-5 features by |contribution| → list of dicts for UI/DB
+1. build_feature_vector(field_id, crop) → 30-feature dict (full v7 schema)
+2. registry.get_yield_model(crop) → model payload incl. canonical
+   `features` list per model version
+3. select_features(dict, payload["features"]) → (1, N) numpy array
+   matching the model's expected order
+4. model.predict(arr) → scalar yield estimate (t/ha)
+5. registry.get_shap_explainer(crop) → optional SHAP TreeExplainer
+6. top-5 features by |contribution| → list of dicts for UI/DB
 """
 from __future__ import annotations
 
@@ -16,7 +19,11 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.db.models.enums import CropType
-from app.ml.features import FEATURE_NAMES, build_feature_vector, to_xgb_input
+from app.ml.features import (
+    V3_BASE_FEATURES,
+    build_feature_vector,
+    select_features,
+)
 from app.ml.registry import get_registry
 
 log = logging.getLogger(__name__)
@@ -34,18 +41,50 @@ class YieldPrediction:
 
 def predict_yield(session: Session, field_id: int, crop: CropType) -> YieldPrediction:
     registry = get_registry()
-    payload = registry.get_yield_model(crop)
+    # Resolve via the registry's own preference walk so we know the
+    # canonical (family, version) — the filename-derived truth. Some v7
+    # joblib payloads have a stale `version="v3"` baked in (trainer bug
+    # that didn't bump the string when migrating the dump format from
+    # v3 to v7); trusting `payload["version"]` here would misreport the
+    # model to the UI even though the right artefact is being used.
+    resolved = registry._resolve_default(crop)
+    if resolved is None:
+        raise RuntimeError(
+            f"No trained model for crop={crop.value}. "
+            f"Run scripts/train_yield_models_v7.py first."
+        )
+    resolved_family, resolved_version = resolved
+    payload = registry.get_yield_model(
+        crop, family=resolved_family, version=resolved_version,
+    )
     if payload is None:
         raise RuntimeError(
             f"No trained model for crop={crop.value}. "
-            f"Run scripts/train_yield_models.py first."
+            f"Run scripts/train_yield_models_v7.py first."
         )
 
-    features = build_feature_vector(session, field_id)
-    arr = to_xgb_input(features)
+    # Build the full 30-feature dict, then slice down to whatever the
+    # loaded model expects (v3=17, v6=23, v7=30). The trainer always
+    # stores its expected feature list in `payload["features"]`; falling
+    # back to V3_BASE_FEATURES keeps very old v1/v2 payloads working
+    # even though they predate the metadata convention.
+    features = build_feature_vector(session, field_id, crop=crop)
+    expected: list[str] | tuple[str, ...] = payload.get("features") or V3_BASE_FEATURES
+    arr = select_features(features, expected)
 
-    model = payload["model"]
-    value = float(model.predict(arr)[0])
+    # The payload may store the regressor under "model" (v3+ stack /
+    # rf / lgbm / cat) or directly under "point" inside an xgboost
+    # quantile-triple. Handle both shapes.
+    model_obj = payload.get("model")
+    if model_obj is None and "point" in payload:
+        # Legacy XGBoost triple payload (point + q05 + q95). Use point.
+        model_obj = payload["point"]
+    if model_obj is None:
+        raise RuntimeError(
+            f"Unrecognised model payload for crop={crop.value}: keys={list(payload)}"
+        )
+
+    value = float(model_obj.predict(arr)[0])
 
     explainer = registry.get_shap_explainer(crop)
     shap_top: list[dict] = []
@@ -53,7 +92,8 @@ def predict_yield(session: Session, field_id: int, crop: CropType) -> YieldPredi
         try:
             shap_vals = explainer(arr)
             # shap_vals.values shape: (1, n_features); shap_vals.base_values: (1,)
-            contribs = list(zip(FEATURE_NAMES, shap_vals.values[0], arr[0]))
+            # Use the same `expected` order so contribution names line up.
+            contribs = list(zip(expected, shap_vals.values[0], arr[0]))
             contribs.sort(key=lambda x: abs(x[1]), reverse=True)
             shap_top = [
                 {
@@ -74,15 +114,26 @@ def predict_yield(session: Session, field_id: int, crop: CropType) -> YieldPredi
     else:
         confidence = None
 
-    # Identify algorithm family from the loaded payload — registry now keeps
-    # xgboost / rf alongside each other. Falls back to xgb for older payloads.
-    model_class = type(payload["model"]).__name__.lower()
-    family = "rf" if "forest" in model_class else "xgb"
+    # Use the resolved (family, version) from the registry — same
+    # rationale as above (payload metadata sometimes lies after the
+    # v3→v7 trainer dump-format migration).
+    # File-prefix mapping mirrors registry.FAMILY_FILE_PREFIX so the
+    # `model_name` value persisted on Prediction rows matches the
+    # actual .joblib filename users see on disk.
+    family_prefix = {
+        "xgboost": "xgb",
+        "rf": "rf",
+        "lstm": "lstm",
+        "lightgbm": "lgbm",
+        "catboost": "cat",
+        "stack": "stack",
+    }.get(resolved_family, resolved_family)
+
     return YieldPrediction(
         value_tha=round(value, 2),
         confidence=confidence,
         features=features,
         shap_top=shap_top,
-        model_name=f"yield_{family}_{crop.value}",
-        model_version=payload.get("version", "v1"),
+        model_name=f"yield_{family_prefix}_{crop.value}",
+        model_version=resolved_version,
     )

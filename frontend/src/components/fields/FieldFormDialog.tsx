@@ -21,9 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { CropType, FieldRead } from "@/api/fields";
-
-const CROPS: CropType[] = ["wheat", "corn", "sunflower"];
+import { ALL_CROPS, type CropType, type FieldRead } from "@/api/fields";
 
 export interface FieldFormValues {
   name: string;
@@ -118,7 +116,7 @@ export function FieldFormDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CROPS.map((c) => (
+                {ALL_CROPS.map((c) => (
                   <SelectItem key={c} value={c}>
                     {t(`fields.crops.${c}`)}
                   </SelectItem>

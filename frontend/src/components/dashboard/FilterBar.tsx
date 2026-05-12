@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Wheat } from "lucide-react";
 
 import type { CropType } from "@/api/dashboard";
+import { ALL_CROPS } from "@/api/fields";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -9,8 +10,6 @@ interface Props {
   selectedCrops: CropType[];
   onCropsChange: (crops: CropType[]) => void;
 }
-
-const CROPS: CropType[] = ["wheat", "corn", "sunflower"];
 
 /**
  * Compact filter bar above the dashboard. Only crop filter remains —
@@ -36,8 +35,8 @@ export function FilterBar({ selectedCrops, onCropsChange }: Props) {
         <span className="text-xs text-muted-foreground">
           {t("dashboardFilters.crops")}:
         </span>
-        <div className="flex gap-1">
-          {CROPS.map((crop) => {
+        <div className="flex flex-wrap gap-1">
+          {ALL_CROPS.map((crop) => {
             const active = selectedCrops.includes(crop);
             return (
               <Button

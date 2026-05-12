@@ -31,6 +31,7 @@ from app.db.models import (
     User,
     WeatherObservation,
 )
+from app.db.models.enums import CropType
 from app.integrations.openai.client import OpenAIClient, OpenAIError
 from app.reports.charts import (
     INDEX_LABELS_UK,
@@ -49,8 +50,23 @@ log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 INDEX_NAMES = ("ndvi", "evi", "ndwi", "savi")
-CROP_LABELS_UK = {"wheat": "Пшениця", "corn": "Кукурудза", "sunflower": "Соняшник"}
 SEVERITY_LABELS_UK = {"info": "Інфо", "warning": "Увага", "critical": "Критично"}
+
+
+def _crop_label_uk(value: str) -> str:
+    """Resolve a Cyrillic crop label for PDF rendering.
+
+    Delegates to `CropType.display_uk` so this stays in sync with the
+    enum's display names for all 13 crops (wheat, corn, sunflower,
+    soybean, rapeseed, barley, rye, oats, buckwheat, peas, sugar_beet,
+    potato, corn_silage). Falls back to the raw slug if the value is
+    unknown — defensive for stale rows or legacy data, so PDFs keep
+    rendering even after a future schema rename.
+    """
+    try:
+        return CropType(value).display_uk
+    except (ValueError, KeyError):
+        return value
 
 # Field-report section keys. Builder lets the user pick a subset of these;
 # unspecified = all enabled (legacy behaviour for the inline export button).
@@ -238,12 +254,12 @@ async def build_field_report(
     context = {
         "title": f"Звіт по полю — {field.name}",
         "heading": field.name,
-        "subheading": f"{CROP_LABELS_UK.get(crop_value, crop_value)} · {field.season_year} · "
+        "subheading": f"{_crop_label_uk(crop_value)} · {field.season_year} · "
                       f"{float(field.area_ha):.2f} га",
         "generated_at": _now_uk(),
         "field": {
             "name": field.name,
-            "crop_label": CROP_LABELS_UK.get(crop_value, crop_value),
+            "crop_label": _crop_label_uk(crop_value),
             "season_year": field.season_year,
             "area_ha": float(field.area_ha),
             "centroid_lat": centroid_lat,
@@ -330,7 +346,7 @@ async def build_portfolio_report(
         fields_payload.append({
             "field_id": f.id,
             "name": f.name,
-            "crop_label": CROP_LABELS_UK.get(crop_value, crop_value),
+            "crop_label": _crop_label_uk(crop_value),
             "area_ha": float(f.area_ha),
             "current_ndvi": float(latest_ndvi) if latest_ndvi is not None else None,
             "predicted_tha": predicted_tha,
@@ -484,7 +500,7 @@ async def build_compare_report(
         fields_payload.append({
             "field_id": fid,
             "name": field.name,
-            "crop_label": CROP_LABELS_UK.get(crop_val, crop_val),
+            "crop_label": _crop_label_uk(crop_val),
             "area_ha": float(field.area_ha),
             "ndvi_mean": ndvi_mean,
             "ndvi_peak": ndvi_peak,

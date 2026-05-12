@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Coins, Settings as SettingsIcon } from "lucide-react";
 
 import type { DashboardFieldRow, CropType } from "@/api/dashboard";
+import { ALL_CROPS } from "@/api/fields";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCropPrices } from "@/hooks/useCropPrices";
@@ -25,11 +26,12 @@ export function IncomeProjectionCard({ fields }: Props) {
 
   const breakdown = useMemo(() => {
     if (!prices) return null;
-    const perCrop: Record<CropType, { yield_t: number; income: number }> = {
-      wheat: { yield_t: 0, income: 0 },
-      corn: { yield_t: 0, income: 0 },
-      sunflower: { yield_t: 0, income: 0 },
-    };
+    // Initialize the per-crop tallies from `ALL_CROPS` so every crop
+    // gets a row regardless of whether the user has fields for it
+    // (the render-side filter later drops empties from the display).
+    const perCrop = Object.fromEntries(
+      ALL_CROPS.map((c) => [c, { yield_t: 0, income: 0 }]),
+    ) as Record<CropType, { yield_t: number; income: number }>;
     let total = 0;
     let hasAnyData = false;
 
@@ -51,9 +53,10 @@ export function IncomeProjectionCard({ fields }: Props) {
   const currency = prices?.currency ?? "UAH";
   const pricesSet =
     !!prices &&
-    [prices.wheat, prices.corn, prices.sunflower].some(
-      (p) => p !== null && p !== undefined,
-    );
+    ALL_CROPS.some((c) => {
+      const v = prices[c];
+      return v !== null && v !== undefined;
+    });
 
   return (
     <Card>

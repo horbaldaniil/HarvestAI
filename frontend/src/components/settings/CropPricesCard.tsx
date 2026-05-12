@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,27 +14,39 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCropPrices, useUpdateCropPrices } from "@/hooks/useCropPrices";
-import type { Currency } from "@/api/settings";
+import type { CropPricesUpdate, Currency } from "@/api/settings";
+import { ALL_CROPS, type CropType } from "@/api/fields";
 
 /**
- * Per-crop price editor. Values feed the dashboard's Income projection card
- * and the PDF portfolio report (when set). Empty input = "not set" — we
- * send null to clear stored prices on submit.
+ * Per-crop price editor. Values feed the dashboard's Income projection
+ * card and the PDF portfolio report (when set). Empty input = "not set"
+ * — we send `null` to clear stored prices on submit.
+ *
+ * Driven by `ALL_CROPS` so adding a new crop (i.e. adding a 14th slug
+ * to the enum + `CropPrices` interface) automatically adds a row here
+ * without code changes — just a translation key under `fields.crops`.
  */
 export function CropPricesCard() {
+  const { t } = useTranslation();
   const { data, isLoading } = useCropPrices();
   const update = useUpdateCropPrices();
 
-  const [wheat, setWheat] = useState<string>("");
-  const [corn, setCorn] = useState<string>("");
-  const [sunflower, setSunflower] = useState<string>("");
+  // Form state is one string-per-crop record so a 14th crop "just shows
+  // up" instead of requiring a new useState pair. Strings (not numbers)
+  // because the input is text-typed and "" is a valid "clear" signal.
+  const [values, setValues] = useState<Record<CropType, string>>(
+    () => Object.fromEntries(ALL_CROPS.map((c) => [c, ""])) as Record<CropType, string>,
+  );
   const [currency, setCurrency] = useState<Currency>("UAH");
 
   useEffect(() => {
     if (!data) return;
-    setWheat(data.wheat !== null && data.wheat !== undefined ? String(data.wheat) : "");
-    setCorn(data.corn !== null && data.corn !== undefined ? String(data.corn) : "");
-    setSunflower(data.sunflower !== null && data.sunflower !== undefined ? String(data.sunflower) : "");
+    const next = {} as Record<CropType, string>;
+    for (const crop of ALL_CROPS) {
+      const v = data[crop];
+      next[crop] = v !== null && v !== undefined ? String(v) : "";
+    }
+    setValues(next);
     setCurrency(data.currency ?? "UAH");
   }, [data]);
 
@@ -45,13 +58,15 @@ export function CropPricesCard() {
   };
 
   const handleSave = () => {
-    update.mutate({
-      currency,
-      wheat: parse(wheat),
-      corn: parse(corn),
-      sunflower: parse(sunflower),
-    });
+    const payload: CropPricesUpdate = { currency };
+    for (const crop of ALL_CROPS) {
+      payload[crop] = parse(values[crop]);
+    }
+    update.mutate(payload);
   };
+
+  const setOne = (crop: CropType) => (v: string) =>
+    setValues((prev) => ({ ...prev, [crop]: v }));
 
   return (
     <Card>
@@ -82,9 +97,15 @@ export function CropPricesCard() {
                 </SelectContent>
               </Select>
             </div>
-            <PriceField label="Пшениця" value={wheat} onChange={setWheat} currency={currency} />
-            <PriceField label="Кукурудза" value={corn} onChange={setCorn} currency={currency} />
-            <PriceField label="Соняшник" value={sunflower} onChange={setSunflower} currency={currency} />
+            {ALL_CROPS.map((crop) => (
+              <PriceField
+                key={crop}
+                label={t(`fields.crops.${crop}`)}
+                value={values[crop]}
+                onChange={setOne(crop)}
+                currency={currency}
+              />
+            ))}
             <Button
               onClick={handleSave}
               disabled={update.isPending}
