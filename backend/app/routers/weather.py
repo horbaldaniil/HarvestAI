@@ -64,7 +64,13 @@ class WeatherDetail(BaseModel):
     crop_type: str
     centroid_lat: float | None
     centroid_lon: float | None
+    # Upcoming `days`-day forecast (is_forecast=True rows).
     days: list[WeatherDayRead]
+    # Last `days`-day actuals (is_forecast=False rows, observed_on < today).
+    # Empty list when no historical data has been collected yet — the UI
+    # then hides the "Останні 14 днів" card. Two ordered ranges keep
+    # rendering trivially symmetric on the frontend strip.
+    history_days: list[WeatherDayRead]
     advices: list[WeatherAdviceRead]
 
 
@@ -86,6 +92,8 @@ async def weather_detail(
 
     today = date.today()
     until = today + timedelta(days=days)
+    since = today - timedelta(days=days)
+
     rows = list((await db.execute(
         select(WeatherObservation)
         .where(WeatherObservation.field_id == field_id)
@@ -95,8 +103,24 @@ async def weather_detail(
         .order_by(WeatherObservation.observed_on.asc())
     )).scalars().all())
 
+    # Past `days` actuals — same query shape mirrored backwards. The
+    # `is_forecast=False` filter excludes forecast rows that may have
+    # since had their date drift into the past (Open-Meteo sometimes
+    # leaves stale forecast rows when a historical sync hasn't run).
+    history_rows = list((await db.execute(
+        select(WeatherObservation)
+        .where(WeatherObservation.field_id == field_id)
+        .where(WeatherObservation.is_forecast.is_(False))
+        .where(WeatherObservation.observed_on >= since)
+        .where(WeatherObservation.observed_on < today)
+        .order_by(WeatherObservation.observed_on.asc())
+    )).scalars().all())
+
     day_payloads = [WeatherDayRead.model_validate(r) for r in rows]
+    history_payloads = [WeatherDayRead.model_validate(r) for r in history_rows]
     crop_val = f.crop_type.value if hasattr(f.crop_type, "value") else str(f.crop_type)
+    # Advisories are computed only against the upcoming forecast —
+    # "wear sunglasses last Tuesday" is unhelpful.
     advices = build_advices(
         [d.model_dump() for d in day_payloads],
         crop=crop_val,
@@ -119,6 +143,7 @@ async def weather_detail(
         centroid_lat=centroid_lat,
         centroid_lon=centroid_lon,
         days=day_payloads,
+        history_days=history_payloads,
         advices=[
             WeatherAdviceRead(severity=a.severity, title=a.title, detail=a.detail)
             for a in advices

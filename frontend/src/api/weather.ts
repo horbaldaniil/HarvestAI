@@ -34,7 +34,14 @@ export interface WeatherDetail {
   crop_type: CropType;
   centroid_lat: number | null;
   centroid_lon: number | null;
+  /** Upcoming N-day forecast (is_forecast = true rows). */
   days: WeatherDay[];
+  /**
+   * Past N-day actuals (is_forecast = false, observed_on < today).
+   * Empty array when no historical data has been collected for this
+   * field — the UI hides the "Останні 14 днів" card in that case.
+   */
+  history_days: WeatherDay[];
   advices: WeatherAdvice[];
 }
 

@@ -38,3 +38,48 @@ export async function updateCropPrices(
   const { data } = await api.put<CropPrices>("/api/settings/crop-prices", payload);
   return data;
 }
+
+
+// ─── Profile ─────────────────────────────────────────────────
+
+/**
+ * Flat shape combining the `users.full_name` column with two JSONB
+ * fields (`farm_name`, `phone_number`). The backend hides the split
+ * behind a single `/api/settings/profile` endpoint.
+ */
+export interface Profile {
+  full_name: string | null;
+  farm_name: string | null;
+  phone_number: string | null;
+}
+
+export type ProfileUpdate = Partial<Profile>;
+
+export async function getProfile(): Promise<Profile> {
+  const { data } = await api.get<Profile>("/api/settings/profile");
+  return data;
+}
+
+export async function updateProfile(payload: ProfileUpdate): Promise<Profile> {
+  const { data } = await api.put<Profile>("/api/settings/profile", payload);
+  return data;
+}
+
+
+// ─── AI-suggested crop prices ────────────────────────────────
+
+/**
+ * One-shot LLM call returning plausible procurement prices for the
+ * 13 supported crops in the requested currency. The response shape
+ * matches `CropPrices` so the form can populate it directly; values
+ * with no AI estimate come back as `null`.
+ */
+export async function suggestCropPrices(
+  currency: Currency = "UAH",
+): Promise<CropPrices> {
+  const { data } = await api.post<CropPrices>(
+    "/api/settings/crop-prices/suggest",
+    { currency },
+  );
+  return data;
+}

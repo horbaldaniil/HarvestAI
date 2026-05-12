@@ -43,7 +43,7 @@ export function TopMoversCard({ movers, currentYear }: Props) {
       <CardHeader>
         <CardTitle className="text-base">Найбільші зміни NDVI</CardTitle>
         <CardDescription>
-          Середній NDVI {prevYear} → {currentYear}, поля з найбільшою динамікою
+          Середній NDVI з 1 січня по сьогодні, {prevYear} → {currentYear}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">

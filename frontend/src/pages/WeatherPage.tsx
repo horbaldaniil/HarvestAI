@@ -70,6 +70,7 @@ export function WeatherPage() {
 
   const sevenDay = (data?.days ?? []).slice(0, 7);
   const fourteenDay = data?.days ?? [];
+  const historyDays = data?.history_days ?? [];
 
   return (
     <AppShell>
@@ -115,6 +116,33 @@ export function WeatherPage() {
         ) : (
           <>
             <FieldContextCard data={data} t={t} />
+
+            {/*
+              Past-14-day strip rendered ABOVE the SevenDayKpis +
+              forecast so the page reads in chronological order:
+              past → today (KPIs are forecast-anchored) → upcoming.
+              Hidden when no historical data has been collected for
+              this field (typical for a freshly-created field whose
+              first weather sync hasn't run yet).
+            */}
+            {historyDays.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Останні 14 днів
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <WeatherDayStrip days={historyDays} />
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    Фактичні погодні дані з Open-Meteo за останні{" "}
+                    {historyDays.length}{" "}
+                    {historyDays.length === 1 ? "день" : "дн."}.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
             <SevenDayKpis days={sevenDay} />
 
             <Card>

@@ -92,12 +92,25 @@ def phenology_calendar(crop: str) -> list[dict[str, Any]]:
 # ─── Risk score ────────────────────────────────────────────────
 
 
+# Open-Meteo `soil_moisture_0_10cm` is volumetric water content (m³/m³).
+# Typical agronomic bands for a temperate loam-clay topsoil:
+#   < 0.10 — wilting point, severe stress
+#   0.10–0.18 — refill / dryness threshold
+#   0.18–0.30 — adequate
+#   > 0.30 — near field capacity
+# We flag below 18 % which catches "soil is drying out" before the crop
+# is wilting. This replaces the older `drought_days < 1mm/day` proxy that
+# misfired after a recent rain shower because it only looked at counts of
+# dry days, not at actual moisture present in the soil.
+SOIL_MOISTURE_LOW_THRESHOLD: float = 0.18
+
+
 def compute_risk_score(
     *,
     current_ndvi: float | None,
     oblast_avg_ndvi: float | None,
     alerts_by_severity: dict[str, int],
-    drought_days_recent: int = 0,
+    recent_soil_moisture: float | None = None,
     heat_days_recent: int = 0,
 ) -> tuple[int, list[str]]:
     """Composite risk score 0-100 plus short factor tags for tooltip.
@@ -105,8 +118,10 @@ def compute_risk_score(
     Factors:
       - NDVI deficit vs oblast average: up to 30 points
       - Active alerts: 10 per warning, 30 per critical (capped at 50)
-      - Recent extreme weather: 15 for drought (>10 dry days), 15 for heat
-        (>5 hot days)
+      - Soil moisture below `SOIL_MOISTURE_LOW_THRESHOLD`: 15 points
+        (replaces the old <1 mm/day counter — see threshold constant
+        for the agronomic rationale)
+      - Recent heat stress (>5 days T_max > 30 °C): 15 points
 
     Score is clamped to [0, 100]. Higher = worse.
     """
@@ -138,51 +153,19 @@ def compute_risk_score(
             tag_parts.append(f"{n_warn} попереджень")
         factors.append("Alerts: " + ", ".join(tag_parts))
 
-    if drought_days_recent > 10:
+    if (
+        recent_soil_moisture is not None
+        and recent_soil_moisture < SOIL_MOISTURE_LOW_THRESHOLD
+    ):
         score += 15
-        factors.append(f"Посуха ({drought_days_recent} днів)")
+        factors.append(
+            f"Низька волога ґрунту ({recent_soil_moisture * 100:.0f}%)"
+        )
     if heat_days_recent > 5:
         score += 15
         factors.append(f"Спека ({heat_days_recent} днів T_max>30°C)")
 
     return min(100, max(0, score)), factors
-
-
-def pick_best_worst(
-    rows: list[dict[str, Any]],
-) -> tuple[dict | None, dict | None]:
-    """Pick the highest-performer (NDVI) and most-at-risk (risk_score) field.
-
-    Both can be the same field in extreme cases — we still return both so
-    the UI shows the duality. Returns None entries when no candidates.
-    """
-    if not rows:
-        return None, None
-    with_ndvi = [r for r in rows if r.get("current_ndvi") is not None]
-    best = max(with_ndvi, key=lambda r: r["current_ndvi"], default=None)
-    worst = max(rows, key=lambda r: r.get("risk_score", 0), default=None)
-
-    def _shape(r: dict, reason: str) -> dict:
-        return {
-            "field_id": r["field_id"],
-            "name": r["name"],
-            "crop_type": r["crop_type"],
-            "current_ndvi": r.get("current_ndvi"),
-            "predicted_tha": r.get("predicted_tha"),
-            "risk_score": r.get("risk_score", 0),
-            "reason": reason,
-        }
-
-    best_payload = (
-        _shape(best, f"Найвищий NDVI ({best['current_ndvi']:.2f})")
-        if best is not None else None
-    )
-    worst_payload = None
-    if worst is not None and worst.get("risk_score", 0) > 0:
-        factors = worst.get("risk_factors") or []
-        reason = factors[0] if factors else f"Risk score {worst.get('risk_score')}"
-        worst_payload = _shape(worst, reason)
-    return best_payload, worst_payload
 
 
 # ─── Oblast NDVI baseline (Week 6 connection) ─────────────────
@@ -389,7 +372,6 @@ __all__ = [
     "oblast_name_uk",
     "phenology_calendar",
     "phenology_phase",
-    "pick_best_worst",
     "reset_oblast_baseline_cache",
     "reset_oblast_polygons_cache",
 ]

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import * as api from "@/api/settings";
+import type { Currency } from "@/api/settings";
 
 const KEY = ["settings", "crop-prices"] as const;
 
@@ -26,6 +27,35 @@ export function useUpdateCropPrices() {
     },
     onError: () => {
       toast.error("Не вдалося зберегти ціни");
+    },
+  });
+}
+
+/**
+ * One-shot AI suggestion. Does NOT write to the backend — the caller
+ * (CropPricesCard) treats the returned numbers as a pre-fill for the
+ * form, which the user reviews + saves manually via
+ * `useUpdateCropPrices()`. Toast surfaces the disclaimer so the user
+ * is reminded the values are estimates.
+ */
+export function useSuggestCropPrices() {
+  return useMutation({
+    mutationFn: (currency: Currency) => api.suggestCropPrices(currency),
+    onSuccess: () => {
+      toast.success(
+        "AI запропонував ціни — перевірте у формі та збережіть",
+        {
+          description:
+            "Цифри орієнтовні, на основі типових ринкових цін. Звіртеся з фактичним ринком перед використанням.",
+          duration: 8000,
+        },
+      );
+    },
+    onError: () => {
+      toast.error("Не вдалося отримати пропозицію від AI", {
+        description:
+          "Перевірте налаштування OPENAI_API_KEY або спробуйте ще раз.",
+      });
     },
   });
 }

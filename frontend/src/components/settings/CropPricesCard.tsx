@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,8 +13,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCropPrices, useUpdateCropPrices } from "@/hooks/useCropPrices";
-import type { CropPricesUpdate, Currency } from "@/api/settings";
+import {
+  useCropPrices,
+  useSuggestCropPrices,
+  useUpdateCropPrices,
+} from "@/hooks/useCropPrices";
+import type { CropPrices, CropPricesUpdate, Currency } from "@/api/settings";
 import { ALL_CROPS, type CropType } from "@/api/fields";
 
 /**
@@ -30,6 +34,7 @@ export function CropPricesCard() {
   const { t } = useTranslation();
   const { data, isLoading } = useCropPrices();
   const update = useUpdateCropPrices();
+  const suggest = useSuggestCropPrices();
 
   // Form state is one string-per-crop record so a 14th crop "just shows
   // up" instead of requiring a new useState pair. Strings (not numbers)
@@ -65,6 +70,30 @@ export function CropPricesCard() {
     update.mutate(payload);
   };
 
+  /**
+   * Populate the form with AI-suggested numbers. We DO NOT save them
+   * to the backend — the user reviews, edits, then clicks "Зберегти".
+   * Existing user-entered values get overwritten only for keys the AI
+   * returned (rest stay). That way "suggest" doesn't wipe a user's
+   * carefully-tuned price for one crop they already know.
+   */
+  const handleSuggest = () => {
+    suggest.mutate(currency, {
+      onSuccess: (suggested: CropPrices) => {
+        setValues((prev) => {
+          const next = { ...prev };
+          for (const crop of ALL_CROPS) {
+            const v = suggested[crop];
+            if (v !== null && v !== undefined) {
+              next[crop] = String(v);
+            }
+          }
+          return next;
+        });
+      },
+    });
+  };
+
   const setOne = (crop: CropType) => (v: string) =>
     setValues((prev) => ({ ...prev, [crop]: v }));
 
@@ -97,6 +126,28 @@ export function CropPricesCard() {
                 </SelectContent>
               </Select>
             </div>
+            {/*
+              AI suggestion — fills the form (does NOT save) with
+              plausible current-season prices for all 13 crops in the
+              chosen currency. User reviews each row + clicks Зберегти
+              to persist. Existing user-entered values are preserved
+              for any crops the AI didn't return.
+            */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleSuggest}
+              disabled={suggest.isPending || update.isPending}
+              className="w-full"
+            >
+              {suggest.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4 text-amber-500" />
+              )}
+              Запропонувати ціни через AI
+            </Button>
             {ALL_CROPS.map((crop) => (
               <PriceField
                 key={crop}

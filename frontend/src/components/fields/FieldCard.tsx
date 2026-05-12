@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Pencil, Trash2, MapPin } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import type { FieldRead } from "@/api/fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,19 +64,11 @@ export function FieldCard({
         </div>
       </div>
 
-      <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 flex-1 text-xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(field);
-          }}
-          title={t("fields.actions.focus")}
-        >
-          <MapPin className="h-3.5 w-3.5" />
-        </Button>
+      {/* Action row — always visible (no hover-reveal). The MapPin
+          "focus on map" button was removed because clicking the card
+          itself already triggers `onSelect`, so the icon was a dead
+          duplicate of the parent click handler. */}
+      <div className="mt-2 flex gap-1">
         <Button
           variant="ghost"
           size="sm"

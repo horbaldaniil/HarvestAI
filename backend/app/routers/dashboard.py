@@ -29,7 +29,6 @@ from app.db.models import (
 )
 from app.deps import CurrentUser, DbSession
 from app.schemas.prediction import (
-    BestWorstField,
     CropBreakdownItem,
     DashboardFieldRow,
     DashboardKpis,
@@ -45,7 +44,6 @@ from app.services.dashboard_analytics import (
     oblast_avg_ndvi,
     oblast_baseline_year,
     oblast_name_uk,
-    pick_best_worst,
 )
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -101,6 +99,20 @@ async def get_dashboard(
     weather_window_start = today - timedelta(days=WEATHER_WINDOW_DAYS)
     current_year = today.year
 
+    # YTD comparison window for the "Найбільші зміни NDVI" movers card —
+    # Jan 1 → today this year vs Jan 1 → same date prior year. Honest
+    # mid-season comparison; the old `EXTRACT(year FROM observed_on) = Y`
+    # filter pitted partial-year current against full-year prior, which
+    # made mid-season YoY look misleadingly negative.
+    ytd_start_cy = date(current_year, 1, 1)
+    ytd_end_cy = today
+    ytd_start_py = date(current_year - 1, 1, 1)
+    try:
+        ytd_end_py = date(current_year - 1, today.month, today.day)
+    except ValueError:
+        # Feb 29 → clamp to Feb 28 when prior year isn't a leap year.
+        ytd_end_py = date(current_year - 1, today.month, today.day - 1)
+
     # Crop breakdown computed on the full portfolio (not crop-filtered) so
     # the donut/calendar always reflects the full mix.
     breakdown_acc: dict[str, dict[str, float]] = {}
@@ -111,7 +123,6 @@ async def get_dashboard(
         entry["area"] += float(f.area_ha)
 
     field_rows: list[DashboardFieldRow] = []
-    field_rows_raw: list[dict] = []
     movers_pool: list[dict] = []
     total_area = 0.0
     total_predicted_yield = 0.0
@@ -152,16 +163,20 @@ async def get_dashboard(
         if current_ndwi is not None:
             ndwi_pool.append(current_ndwi)
 
-        # Year-over-year averages (full-year, not window).
+        # YTD averages: Jan 1 → today this year vs same window prior
+        # year. See `ytd_start_cy` block at the top of this function for
+        # the leap-year edge case (Feb 29 clamps to Feb 28).
         cy_avg = (await db.execute(
             select(func.avg(SatelliteObservation.ndvi_mean))
             .where(SatelliteObservation.field_id == f.id)
-            .where(func.extract("year", SatelliteObservation.observed_on) == current_year)
+            .where(SatelliteObservation.observed_on >= ytd_start_cy)
+            .where(SatelliteObservation.observed_on <= ytd_end_cy)
         )).scalar()
         py_avg = (await db.execute(
             select(func.avg(SatelliteObservation.ndvi_mean))
             .where(SatelliteObservation.field_id == f.id)
-            .where(func.extract("year", SatelliteObservation.observed_on) == current_year - 1)
+            .where(SatelliteObservation.observed_on >= ytd_start_py)
+            .where(SatelliteObservation.observed_on <= ytd_end_py)
         )).scalar()
         if cy_avg is not None:
             cy_ndvi.append(float(cy_avg))
@@ -197,10 +212,25 @@ async def get_dashboard(
             .where(WeatherObservation.observed_on >= weather_window_start)
             .where(WeatherObservation.is_forecast.is_(False))
         )).scalars().all())
-        drought_days = sum(
-            1 for w in weather_recent
-            if w.precip_mm is not None and float(w.precip_mm) < 1.0
+
+        # Recent soil moisture — averaged over the last 3 days of actual
+        # observations. Replaces the old "11 of 14 days had <1 mm precip
+        # → drought" heuristic, which mis-fired after a fresh shower
+        # because it ignored the moisture actually present in the soil.
+        # Open-Meteo's `soil_moisture_0_10cm` is volumetric water content
+        # (m³/m³); see `SOIL_MOISTURE_LOW_THRESHOLD` for the agronomic
+        # band that triggers the risk flag.
+        moisture_window_start = today - timedelta(days=3)
+        recent_moisture_vals = [
+            float(w.soil_moisture_0_10cm) for w in weather_recent
+            if w.soil_moisture_0_10cm is not None
+            and w.observed_on >= moisture_window_start
+        ]
+        recent_soil_moisture = (
+            sum(recent_moisture_vals) / len(recent_moisture_vals)
+            if recent_moisture_vals else None
         )
+
         heat_days = sum(
             1 for w in weather_recent
             if w.temp_max_c is not None and float(w.temp_max_c) > 30.0
@@ -224,7 +254,7 @@ async def get_dashboard(
             current_ndvi=current_ndvi,
             oblast_avg_ndvi=oblast_baseline,
             alerts_by_severity=alerts_by_severity,
-            drought_days_recent=drought_days,
+            recent_soil_moisture=recent_soil_moisture,
             heat_days_recent=heat_days,
         )
 
@@ -250,7 +280,6 @@ async def get_dashboard(
             "geometry": _field_polygon_geojson(f),
         }
         field_rows.append(DashboardFieldRow(**row_dict))
-        field_rows_raw.append(row_dict)
 
     unread_alerts = await db.scalar(
         select(func.count()).select_from(Alert)
@@ -273,7 +302,6 @@ async def get_dashboard(
         for m in sorted(movers_pool, key=lambda m: abs(m["diff_pct"]), reverse=True)[:3]
     ]
 
-    best, worst = pick_best_worst(field_rows_raw)
     weather_by_field = await _build_weather_by_field(db, fields)
 
     return DashboardResponse(
@@ -293,8 +321,6 @@ async def get_dashboard(
             diff_pct=diff_pct,
         ),
         top_movers=top_movers,
-        best_field=BestWorstField(**best) if best else None,
-        worst_field=BestWorstField(**worst) if worst else None,
         crops_breakdown=[
             CropBreakdownItem(
                 crop_type=crop, field_count=int(v["count"]), area_ha=round(v["area"], 2),
@@ -354,6 +380,13 @@ async def _build_weather_by_field(db, fields: list[Field]) -> list[FieldWeather]
         temp_max_7d = max(
             (d.temp_max_c for d in days if d.temp_max_c is not None), default=None,
         )
+        temp_min_7d = min(
+            (d.temp_min_c for d in days if d.temp_min_c is not None), default=None,
+        )
+        avg_vals = [d.temp_mean_c for d in days if d.temp_mean_c is not None]
+        temp_avg_7d = (
+            round(sum(avg_vals) / len(avg_vals), 1) if avg_vals else None
+        )
         precip_sum_7d = sum(d.precip_mm or 0 for d in days)
         heat_days_count = sum(
             1 for d in days if d.temp_max_c is not None and d.temp_max_c > 30.0
@@ -362,10 +395,13 @@ async def _build_weather_by_field(db, fields: list[Field]) -> list[FieldWeather]
         out.append(FieldWeather(
             field_id=f.id,
             field_name=f.name,
+            crop_type=_crop_value(f.crop_type),
             centroid_lat=round(centroid[0], 5) if centroid else None,
             centroid_lon=round(centroid[1], 5) if centroid else None,
             days=days,
             temp_max_7d=round(temp_max_7d, 1) if temp_max_7d is not None else None,
+            temp_min_7d=round(temp_min_7d, 1) if temp_min_7d is not None else None,
+            temp_avg_7d=temp_avg_7d,
             precip_sum_7d=round(precip_sum_7d, 1) if days else None,
             heat_stress_days_7d=heat_days_count,
         ))

@@ -81,11 +81,19 @@ class OpenAIClient:
         tools: list[dict] | None = None,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        response_format: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Non-streaming chat completion. Returns the parsed JSON response."""
+        """Non-streaming chat completion. Returns the parsed JSON response.
+
+        `response_format={"type": "json_object"}` opts into OpenAI's JSON
+        mode — the assistant is forced to emit a valid top-level JSON
+        object instead of free-form text. Required by the AI-suggested
+        crop prices feature (parses straight into a dict).
+        """
         payload = self._build_payload(
             messages, tools=tools, temperature=temperature,
             max_tokens=max_tokens, stream=False,
+            response_format=response_format,
         )
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
@@ -141,6 +149,7 @@ class OpenAIClient:
         temperature: float,
         max_tokens: int | None,
         stream: bool,
+        response_format: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._model,
@@ -154,6 +163,8 @@ class OpenAIClient:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if response_format is not None:
+            payload["response_format"] = response_format
         return payload
 
     async def _raise_for_status(self, resp: httpx.Response) -> None:

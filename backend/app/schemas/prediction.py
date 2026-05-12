@@ -120,17 +120,6 @@ class DashboardFieldRow(BaseModel):
     geometry: dict | None = None
 
 
-class BestWorstField(BaseModel):
-    """Highlight cards: top NDVI performer + most-at-risk field."""
-    field_id: int
-    name: str
-    crop_type: str
-    current_ndvi: float | None
-    predicted_tha: float | None
-    risk_score: int = 0
-    reason: str  # short human-readable explanation
-
-
 class CropBreakdownItem(BaseModel):
     crop_type: str
     field_count: int
@@ -152,13 +141,23 @@ class FieldYoYDelta(BaseModel):
 class FieldWeather(BaseModel):
     """Per-field 7-day weather summary. Replaces the old averaged
     `WeatherSummary` — much clearer where "this weather" applies, especially
-    when fields are spread across oblasts."""
+    when fields are spread across oblasts.
+
+    The `temp_min_7d` and `temp_avg_7d` aggregates are surfaced for the
+    per-field row on the dashboard's WeatherSummaryCard ("Серед. NN°C,
+    ↑max°/↓min°"). `crop_type` is denormalised here so the frontend can
+    render the crop chip + label without joining back against the
+    `fields` collection.
+    """
     field_id: int
     field_name: str
+    crop_type: str
     centroid_lat: float | None
     centroid_lon: float | None
     days: list[WeatherDayRead] = []
     temp_max_7d: float | None = None
+    temp_min_7d: float | None = None
+    temp_avg_7d: float | None = None
     precip_sum_7d: float | None = None
     heat_stress_days_7d: int = 0
 
@@ -170,8 +169,6 @@ class DashboardResponse(BaseModel):
     # Top-3 fields with the biggest |YoY% change|. Replaces the
     # portfolio-average YoY widget.
     top_movers: list[FieldYoYDelta] = []
-    best_field: BestWorstField | None = None
-    worst_field: BestWorstField | None = None
     crops_breakdown: list[CropBreakdownItem] = []
     # Per-field 7-day forecast list; UI picks one via dropdown.
     weather_by_field: list[FieldWeather] = []

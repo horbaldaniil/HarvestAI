@@ -22,7 +22,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
-import { BestWorstCards } from "@/components/dashboard/BestWorstCards";
 import { CropCalendarTimeline } from "@/components/dashboard/CropCalendarTimeline";
 import { DashboardMap } from "@/components/dashboard/DashboardMap";
 import { FilterBar } from "@/components/dashboard/FilterBar";
@@ -53,7 +52,7 @@ export function DashboardPage() {
     );
   }
 
-  const { kpis, fields, top_movers, best_field, worst_field, weather_by_field, yoy } = data;
+  const { kpis, fields, top_movers, weather_by_field, yoy } = data;
 
   const handleExport = async () => {
     setExporting(true);
@@ -144,13 +143,8 @@ export function DashboardPage() {
           />
         </div>
 
-        {/* Best/Worst + Income */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <BestWorstCards best={best_field} worst={worst_field} />
-          </div>
-          <IncomeProjectionCard fields={fields} />
-        </div>
+        {/* Income projection */}
+        <IncomeProjectionCard fields={fields} />
 
         {/* Fields table + Top movers + Weather */}
         <div className="grid gap-4 lg:grid-cols-3">

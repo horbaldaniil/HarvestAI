@@ -15,7 +15,6 @@ from app.services.dashboard_analytics import (
     oblast_name_uk,
     phenology_calendar,
     phenology_phase,
-    pick_best_worst,
     reset_oblast_baseline_cache,
     reset_oblast_polygons_cache,
 )
@@ -90,7 +89,7 @@ def test_risk_score_caps_at_100():
         current_ndvi=0.10,
         oblast_avg_ndvi=0.80,
         alerts_by_severity={"warning": 5, "critical": 5},
-        drought_days_recent=14,
+        recent_soil_moisture=0.08,  # below 0.18 threshold → drought flag
         heat_days_recent=10,
     )
     assert score == 100
@@ -107,42 +106,49 @@ def test_risk_score_low_ndvi_standalone_still_flags():
     assert any("NDVI" in f for f in factors)
 
 
-# ─── Best/worst picker ──────────────────────────────────────
+def test_risk_score_low_soil_moisture_flags_drought():
+    """Volumetric soil moisture below the 18 % threshold raises a
+    drought-style risk factor — replaces the older `drought_days < 1mm`
+    counter which mis-fired after recent rain. Exactly matches the
+    user-facing label `Низька волога ґрунту (NN%)`."""
+    score, factors = compute_risk_score(
+        current_ndvi=0.55,
+        oblast_avg_ndvi=0.55,
+        alerts_by_severity={},
+        recent_soil_moisture=0.12,
+    )
+    assert score >= 15
+    assert any("волога ґрунту" in f.lower() for f in factors)
+    assert any("12%" in f for f in factors)
 
 
-def test_pick_best_worst_returns_none_for_empty():
-    best, worst = pick_best_worst([])
-    assert best is None
-    assert worst is None
+def test_risk_score_high_soil_moisture_does_not_flag():
+    """Soil moisture above 18 % means the soil is well-watered — no
+    drought flag, even though zero precip would have triggered the
+    old day-counter version of the rule."""
+    score, factors = compute_risk_score(
+        current_ndvi=0.55,
+        oblast_avg_ndvi=0.55,
+        alerts_by_severity={},
+        recent_soil_moisture=0.22,
+    )
+    assert not any("волога ґрунту" in f.lower() for f in factors)
+    # No other factors triggered either — clean field.
+    assert score == 0
 
 
-def test_pick_best_worst_picks_highest_ndvi_and_riskiest():
-    rows = [
-        {"field_id": 1, "name": "A", "crop_type": "wheat",
-         "current_ndvi": 0.40, "predicted_tha": 4.0, "risk_score": 20,
-         "risk_factors": ["Low NDVI"]},
-        {"field_id": 2, "name": "B", "crop_type": "corn",
-         "current_ndvi": 0.78, "predicted_tha": 7.0, "risk_score": 5,
-         "risk_factors": []},
-        {"field_id": 3, "name": "C", "crop_type": "sunflower",
-         "current_ndvi": 0.55, "predicted_tha": None, "risk_score": 70,
-         "risk_factors": ["2 критичних"]},
-    ]
-    best, worst = pick_best_worst(rows)
-    assert best is not None and best["field_id"] == 2
-    assert worst is not None and worst["field_id"] == 3
-    assert "критичних" in worst["reason"] or "NDVI" in worst["reason"]
-
-
-def test_pick_best_worst_worst_none_when_no_risk():
-    rows = [
-        {"field_id": 1, "name": "A", "crop_type": "wheat",
-         "current_ndvi": 0.7, "predicted_tha": 5.0, "risk_score": 0,
-         "risk_factors": []},
-    ]
-    best, worst = pick_best_worst(rows)
-    assert best is not None
-    assert worst is None
+def test_risk_score_missing_soil_moisture_does_not_flag():
+    """When the weather sync hasn't populated moisture (fresh field /
+    Open-Meteo gap), the absence of data must not be treated as
+    drought — `None` is a missing signal, not a zero reading."""
+    score, factors = compute_risk_score(
+        current_ndvi=0.55,
+        oblast_avg_ndvi=0.55,
+        alerts_by_severity={},
+        recent_soil_moisture=None,
+    )
+    assert not any("волога ґрунту" in f.lower() for f in factors)
+    assert score == 0
 
 
 # ─── Oblast resolver (point-in-polygon) ─────────────────────

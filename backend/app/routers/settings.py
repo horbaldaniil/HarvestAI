@@ -1,28 +1,37 @@
-"""User-settings endpoints — currently powering the dashboard income card.
+"""User-settings endpoints — powers the Settings page (Profile +
+CropPrices cards) and the dashboard income projection.
 
 Backed by `users.settings_json` (JSONB, Alembic 0007). One place for any
 small-scale per-user preference so we don't sprinkle 1:1 tables.
 
-Schema we agree on for crop prices (one entry per `CropType`):
+Schema we agree on:
 
   settings_json["crop_prices"] = {
       "currency": "UAH",
       "wheat": 8500.0,        # ціна за тонну
       "corn": 7200.0,
-      "sunflower": 17000.0,
-      "barley": 6800.0,
       # … all 13 crops supported; missing keys = "not set"
   }
+  settings_json["profile"] = {
+      "farm_name": "АгроСвіт",
+      "phone_number": "+380501234567",
+  }
+  # `full_name` stays on the `users` table (auth-adjacent column), but
+  # the /profile endpoint surfaces it alongside the JSONB fields so
+  # the frontend has a single form.
 """
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import User
 from app.deps import CurrentUser, DbSession
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -112,3 +121,124 @@ async def update_crop_prices(
     await db.commit()
     await db.refresh(current_user)
     return CropPricesRead(**current)
+
+
+# ─── Profile (full_name + farm metadata) ─────────────────────
+
+
+class ProfileRead(BaseModel):
+    """User-facing profile card payload.
+
+    `full_name` is stored on the `users` table (auth-adjacent column),
+    while `farm_name` and `phone_number` live in `settings_json["profile"]`
+    to avoid alembic migrations for every new tweak. The frontend
+    consumes a single flat shape — the split is internal.
+    """
+    model_config = ConfigDict(extra="ignore")
+    full_name: str | None = None
+    farm_name: str | None = None
+    phone_number: str | None = None
+
+
+class ProfileUpdate(BaseModel):
+    """Partial update: only fields present in the payload are written.
+    Empty string is treated the same as None — clears the field.
+    """
+    # Light validation: trim length so a runaway paste can't blow up
+    # the JSONB column or break PDF report headers.
+    full_name: str | None = Field(default=None, max_length=255)
+    farm_name: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=64)
+
+
+def _empty_to_none(v: str | None) -> str | None:
+    """Treat `""` as `None` so the UI's "clear field" gesture
+    (delete all chars + Save) actually removes the value."""
+    if v is None:
+        return None
+    stripped = v.strip()
+    return stripped or None
+
+
+@router.get("/profile", response_model=ProfileRead)
+async def get_profile(current_user: CurrentUser) -> ProfileRead:
+    profile = (current_user.settings_json or {}).get("profile") or {}
+    return ProfileRead(
+        full_name=current_user.full_name,
+        farm_name=profile.get("farm_name"),
+        phone_number=profile.get("phone_number"),
+    )
+
+
+@router.put("/profile", response_model=ProfileRead)
+async def update_profile(
+    payload: ProfileUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ProfileRead:
+    payload_dict = payload.model_dump(exclude_unset=True)
+
+    # full_name lives on the users table — write directly to the column.
+    if "full_name" in payload_dict:
+        current_user.full_name = _empty_to_none(payload_dict["full_name"])
+
+    # farm_name + phone_number live in settings_json["profile"].
+    settings = dict(current_user.settings_json or {})
+    profile = dict(settings.get("profile") or {})
+    for key in ("farm_name", "phone_number"):
+        if key in payload_dict:
+            val = _empty_to_none(payload_dict[key])
+            if val is None:
+                profile.pop(key, None)
+            else:
+                profile[key] = val
+    settings["profile"] = profile
+    # Reassign so JSONB diff is detected by SQLAlchemy.
+    current_user.settings_json = settings
+
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return ProfileRead(
+        full_name=current_user.full_name,
+        farm_name=profile.get("farm_name"),
+        phone_number=profile.get("phone_number"),
+    )
+
+
+# ─── AI-suggested crop prices ──────────────────────────────────
+
+
+class CropPricesSuggestRequest(BaseModel):
+    """Optional context for the AI — currency to quote in. Defaults to
+    UAH, which is the only currency we expect 95 % of users to want."""
+    currency: Currency = DEFAULT_CURRENCY
+
+
+@router.post("/crop-prices/suggest", response_model=CropPricesRead)
+async def suggest_crop_prices(
+    payload: CropPricesSuggestRequest,
+    current_user: CurrentUser,
+) -> CropPricesRead:
+    """Ask the LLM for a plausible-current-season price quote for each
+    of the 13 supported crops in `payload.currency`/тонна.
+
+    Returns a `CropPricesRead`-shaped payload that the frontend treats
+    as a *suggestion* — the user reviews the numbers in the form, can
+    edit any cell, and clicks Save to persist via PUT /crop-prices.
+    No write happens here; this endpoint is read-only by design.
+    """
+    _ = current_user  # auth-only — no per-user personalisation in the prompt
+    from app.services.ai_crop_prices import suggest_prices_via_openai
+
+    try:
+        prices = await suggest_prices_via_openai(payload.currency)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("AI crop-prices suggestion failed: %s", exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Не вдалося отримати пропозицію від AI. "
+            "Перевірте, що OPENAI_API_KEY налаштовано, і спробуйте ще раз.",
+        ) from exc
+
+    return CropPricesRead(currency=payload.currency, **prices)

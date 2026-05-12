@@ -51,16 +51,6 @@ export interface FieldYoYDelta {
   diff_pct: number;
 }
 
-export interface BestWorstField {
-  field_id: number;
-  name: string;
-  crop_type: CropType;
-  current_ndvi: number | null;
-  predicted_tha: number | null;
-  risk_score: number;
-  reason: string;
-}
-
 export interface CropBreakdownItem {
   crop_type: CropType;
   field_count: number;
@@ -81,10 +71,13 @@ export interface WeatherDay {
 export interface FieldWeather {
   field_id: number;
   field_name: string;
+  crop_type: CropType;
   centroid_lat: number | null;
   centroid_lon: number | null;
   days: WeatherDay[];
   temp_max_7d: number | null;
+  temp_min_7d: number | null;
+  temp_avg_7d: number | null;
   precip_sum_7d: number | null;
   heat_stress_days_7d: number;
 }
@@ -94,8 +87,6 @@ export interface DashboardResponse {
   fields: DashboardFieldRow[];
   yoy: YearOverYear;
   top_movers: FieldYoYDelta[];
-  best_field: BestWorstField | null;
-  worst_field: BestWorstField | null;
   crops_breakdown: CropBreakdownItem[];
   weather_by_field: FieldWeather[];
   applied_crops: CropType[];

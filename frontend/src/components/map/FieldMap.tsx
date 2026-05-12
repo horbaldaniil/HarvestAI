@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import {
   AttributionControl,
+  LayerGroup,
   LayersControl,
   MapContainer,
   TileLayer,
@@ -49,11 +50,32 @@ export function FieldMap({
           />
         </LayersControl.BaseLayer>
         <LayersControl.BaseLayer name={t("map.baseLayer.satellite")}>
-          <TileLayer
-            attribution="Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxZoom={19}
-          />
+          {/*
+            Hybrid satellite — Esri imagery + transparent reference layer
+            on top. The reference layer ships country / oblast / raion
+            boundaries plus city + village labels with a transparent
+            background, so place names and borders read clearly over
+            the imagery. Both tile layers are wrapped in a single
+            LayerGroup so the LayersControl base-layer toggle treats
+            them as one entity (turning satellite on shows both;
+            turning it off hides both).
+          */}
+          <LayerGroup>
+            <TileLayer
+              attribution="Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+            />
+            <TileLayer
+              // Esri reference overlay — administrative boundaries +
+              // place names. Free, no API key. The PNG tiles are
+              // transparent outside of labels/lines, so they composite
+              // onto the imagery beneath without obscuring fields.
+              attribution=""
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+            />
+          </LayerGroup>
         </LayersControl.BaseLayer>
       </LayersControl>
       {children}
