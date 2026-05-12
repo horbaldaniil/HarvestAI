@@ -176,10 +176,233 @@ def render_multi_field_chart_png(
     return _to_data_uri(fig)
 
 
+# ─── Methodology PDF charts (Phase 5 finishing iteration) ────────────
+
+
+def render_methodology_leaderboard_png(
+    rows: list[dict],
+    *,
+    top_n: int = 15,
+    width_in: float = 7.2,
+    height_in: float = 4.5,
+) -> str:
+    """Top-N (crop, family) entries sorted by test R² → horizontal bar.
+
+    `rows` items must have at least: `crop`, `family`, `test_r2`. Sorted
+    desc by R² (NaN/None last); cropped to top_n.
+    """
+    valid = [r for r in rows if r.get("test_r2") is not None]
+    valid.sort(key=lambda r: r["test_r2"], reverse=True)
+    valid = valid[:top_n]
+
+    if not valid:
+        fig, ax = plt.subplots(figsize=(width_in, 1.0))
+        ax.text(0.5, 0.5, "Метрики ML ще не обчислені", ha="center", va="center", fontsize=10)
+        ax.axis("off")
+        return _to_data_uri(fig)
+
+    labels = [f"{r['crop']} / {r['family']}" for r in valid]
+    r2_values = [r["test_r2"] for r in valid]
+    # Colour scheme: stack rows in deep purple, others in muted green.
+    colours = ["#9333ea" if r["family"] == "stack" else "#5e7d36" for r in valid]
+
+    fig, ax = plt.subplots(figsize=(width_in, height_in))
+    fig.subplots_adjust(left=0.34, right=0.97, top=0.93, bottom=0.10)
+
+    y_pos = range(len(labels))
+    ax.barh(list(y_pos), r2_values, color=colours)
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.invert_yaxis()  # Top-1 at the top.
+    ax.set_xlabel("Test R² (out-of-time generalisation)", fontsize=8)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.axvline(0, color="#777", linewidth=0.5)
+    ax.grid(True, axis="x", linestyle="--", alpha=0.3)
+    ax.set_title(f"Лідерборд моделей (top-{top_n} за test R²)", fontsize=10)
+
+    return _to_data_uri(fig)
+
+
+def render_methodology_residual_map_png(
+    oblast_geojson: dict,
+    residuals_by_iso: dict[str, float],
+    *,
+    width_in: float = 7.2,
+    height_in: float = 4.5,
+) -> str:
+    """Ukraine oblast choropleth coloured by mean abs residual.
+
+    `oblast_geojson` is the FeatureCollection from `ukraine_oblasts.geojson`
+    (each feature has `iso_3166_2` in its properties). `residuals_by_iso`
+    maps `UA-XX` → float (mean absolute residual). Unmapped oblasts are
+    drawn in light grey.
+    """
+    if not oblast_geojson or not residuals_by_iso:
+        fig, ax = plt.subplots(figsize=(width_in, 1.0))
+        ax.text(0.5, 0.5, "Дані залишків відсутні", ha="center", va="center", fontsize=10)
+        ax.axis("off")
+        return _to_data_uri(fig)
+
+    try:
+        import geopandas as gpd
+        from matplotlib.colors import LinearSegmentedColormap
+        from shapely.geometry import shape
+    except ImportError:
+        fig, ax = plt.subplots(figsize=(width_in, 1.0))
+        ax.text(0.5, 0.5, "geopandas not installed", ha="center", va="center", fontsize=10)
+        ax.axis("off")
+        return _to_data_uri(fig)
+
+    geoms = []
+    iso_codes = []
+    names = []
+    values = []
+    vmin = min(residuals_by_iso.values())
+    vmax = max(residuals_by_iso.values())
+
+    for feature in oblast_geojson.get("features", []):
+        props = feature.get("properties", {}) or {}
+        iso = props.get("iso_3166_2")
+        if not iso:
+            continue
+        try:
+            geom = shape(feature["geometry"])
+        except Exception:  # noqa: BLE001
+            continue
+        geoms.append(geom)
+        iso_codes.append(iso)
+        names.append(props.get("name_uk") or props.get("name") or iso)
+        values.append(residuals_by_iso.get(iso))
+
+    gdf = gpd.GeoDataFrame({
+        "iso": iso_codes, "name": names, "residual": values,
+    }, geometry=geoms, crs="EPSG:4326")
+
+    # Yellow → red gradient (matches frontend OblastResidualMap.tsx).
+    cmap = LinearSegmentedColormap.from_list("yellow_red", ["#fde047", "#dc2626"])
+
+    fig, ax = plt.subplots(figsize=(width_in, height_in))
+    fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05)
+
+    # Two-layer plot: greys for missing data, colour for mapped.
+    gdf[gdf["residual"].isna()].plot(
+        ax=ax, color="#e5e7eb", edgecolor="#9ca3af", linewidth=0.5,
+    )
+    mapped = gdf[gdf["residual"].notna()]
+    if not mapped.empty:
+        mapped.plot(
+            ax=ax, column="residual", cmap=cmap, vmin=vmin, vmax=vmax,
+            edgecolor="#4b5563", linewidth=0.5,
+        )
+
+    ax.set_title(
+        f"Mean absolute residual по областях (test split)\n"
+        f"шкала: {vmin:.3f} → {vmax:.3f} т/га",
+        fontsize=10,
+    )
+    ax.set_axis_off()
+    ax.set_aspect("equal")
+
+    return _to_data_uri(fig)
+
+
+def render_methodology_shap_png(
+    feature_importance: dict[str, float],
+    *,
+    top_n: int = 8,
+    width_in: float = 6.5,
+    height_in: float = 3.5,
+    title: str = "Global SHAP — топ фічі",
+) -> str:
+    """Horizontal bar chart of mean |SHAP value| per feature, top-N.
+
+    `feature_importance` is `{feature_name: value}` (typically from
+    evaluate_models.py global_shap or permutation_importance).
+    """
+    if not feature_importance:
+        fig, ax = plt.subplots(figsize=(width_in, 1.0))
+        ax.text(0.5, 0.5, "SHAP не доступний для цієї моделі",
+                ha="center", va="center", fontsize=10)
+        ax.axis("off")
+        return _to_data_uri(fig)
+
+    items = sorted(feature_importance.items(), key=lambda kv: abs(kv[1]),
+                   reverse=True)[:top_n]
+    names = [n for n, _ in items]
+    vals = [abs(v) for _, v in items]
+
+    fig, ax = plt.subplots(figsize=(width_in, height_in))
+    fig.subplots_adjust(left=0.30, right=0.97, top=0.92, bottom=0.12)
+
+    y_pos = range(len(names))
+    ax.barh(list(y_pos), vals, color="#5e7d36")
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(names, fontsize=8)
+    ax.invert_yaxis()
+    ax.set_xlabel("Mean |SHAP value|", fontsize=8)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.grid(True, axis="x", linestyle="--", alpha=0.3)
+    ax.set_title(title, fontsize=10)
+
+    return _to_data_uri(fig)
+
+
+def render_methodology_learning_curves_png(
+    curves_by_family: dict[str, list[dict]],
+    *,
+    width_in: float = 6.8,
+    height_in: float = 3.5,
+) -> str:
+    """One line per family: test R² as a function of training sample size.
+
+    `curves_by_family` is `{family_name: [{n_train, test_r2}, ...]}`
+    (typically the `learning_curve` entries from evaluation_v3.json).
+    """
+    valid = {f: c for f, c in curves_by_family.items() if c}
+    if not valid:
+        fig, ax = plt.subplots(figsize=(width_in, 1.0))
+        ax.text(0.5, 0.5, "Learning curves не доступні", ha="center", va="center", fontsize=10)
+        ax.axis("off")
+        return _to_data_uri(fig)
+
+    palette = {
+        "rf": "#5e7d36",
+        "xgboost": "#3b82f6",
+        "lightgbm": "#a16207",
+        "catboost": "#dc2626",
+        "stack": "#9333ea",
+        "lstm": "#0ea5e9",
+    }
+
+    fig, ax = plt.subplots(figsize=(width_in, height_in))
+    fig.subplots_adjust(left=0.10, right=0.97, top=0.92, bottom=0.15)
+
+    for family, curve in valid.items():
+        # Sort by n_train so the line is monotonic.
+        rows = sorted(curve, key=lambda p: p.get("n_train", 0))
+        xs = [p.get("n_train") for p in rows]
+        ys = [p.get("test_r2") if p.get("test_r2") is not None else float("nan") for p in rows]
+        ax.plot(xs, ys, marker="o", linewidth=1.5, label=family,
+                color=palette.get(family, "#444"))
+
+    ax.set_xlabel("n train", fontsize=8)
+    ax.set_ylabel("test R²", fontsize=8)
+    ax.tick_params(axis="both", labelsize=8)
+    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.legend(loc="best", fontsize=8, framealpha=0.85)
+    ax.set_title("Криві навчання — bias/variance діагностика", fontsize=10)
+
+    return _to_data_uri(fig)
+
+
 __all__ = [
     "INDEX_COLOURS",
     "INDEX_LABELS_UK",
     "render_index_chart_png",
+    "render_methodology_leaderboard_png",
+    "render_methodology_learning_curves_png",
+    "render_methodology_residual_map_png",
+    "render_methodology_shap_png",
     "render_multi_field_chart_png",
     "render_shap_chart_png",
 ]

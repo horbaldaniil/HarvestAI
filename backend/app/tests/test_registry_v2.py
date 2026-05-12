@@ -21,10 +21,26 @@ from app.ml.registry import (
 
 
 def test_default_preference_ordered():
-    """xgboost v2 is preferred over v1, which is preferred over rf v1."""
-    assert DEFAULT_PREFERENCE[0] == ("xgboost", "v2")
-    assert DEFAULT_PREFERENCE[1] == ("xgboost", "v1")
-    assert DEFAULT_PREFERENCE[2] == ("rf", "v1")
+    """v4 ablation iteration promoted Stack v4 to the top (weather-
+    conditioned yields + crop calendar lifted 9 of 13 crops above
+    R²=0). Older versions (v3 / v2 / v1) remain as fallbacks for the
+    ablation chain — this test guards the order is preserved."""
+    isos = [(f, v) for f, v in DEFAULT_PREFERENCE]
+    # v7 stack first → v7 = real-only training + SoilGrids soil features.
+    # v6 / v5 / v4 / v3 / v2 / v1 listed below for ablation comparison.
+    assert isos[0] == ("stack", "v7")
+    assert ("stack", "v7h") in isos
+    assert ("stack", "v6") in isos
+    assert ("stack", "v5") in isos
+    assert ("stack", "v4") in isos
+    assert ("stack", "v3") in isos
+    assert ("xgboost", "v2") in isos
+    assert ("xgboost", "v1") in isos
+    assert ("rf", "v1") in isos
+    # v3 versions all come BEFORE v2/v1 ones.
+    last_v3 = max(i for i, (_, v) in enumerate(isos) if v == "v3")
+    first_v2_or_v1 = min(i for i, (_, v) in enumerate(isos) if v in ("v1", "v2"))
+    assert last_v3 < first_v2_or_v1
 
 
 def test_registry_load_doesnt_crash_when_files_missing(monkeypatch, tmp_path):
@@ -40,15 +56,17 @@ def test_registry_load_doesnt_crash_when_files_missing(monkeypatch, tmp_path):
 
 
 def test_registry_picks_v1_when_only_v1_present():
-    """With the committed v1 .joblibs, the registry falls back to v1 even
-    though v2 is the preferred slot."""
+    """The registry falls back through the DEFAULT_PREFERENCE order. After
+    Phase 4 trained v3 artifacts, the preferred slot is `stack v3`. The
+    important guarantee is that we get *some* version of the wheat model
+    back (not None) when any joblib is present in the repo."""
     ModelRegistry.reset()
     reg = get_registry()
     reg.load_all()
-    # If wheat v1 exists in the repo, fallback should pick it up.
     payload = reg.get_yield_model(CropType.WHEAT)
     if payload is not None:
-        assert payload.get("version") in {"v1", "v2"}
+        # Phase 4 added v3; old assertion {"v1", "v2"} was too narrow.
+        assert payload.get("version") in {"v1", "v2", "v3"}
 
 
 def test_registry_returns_none_for_unknown_explicit_version():
@@ -64,11 +82,14 @@ def test_list_available_contains_family_and_version_for_each_entry():
     ModelRegistry.reset()
     reg = get_registry()
     reg.load_all()
+    # Phase 4 expanded the supported families. Use the canonical
+    # ALL_FAMILIES tuple so this stays in sync if more are added.
+    from app.ml.registry import ALL_FAMILIES
     for entry in reg.list_available():
         assert "crop" in entry
         assert "family" in entry
         assert "version" in entry
-        assert entry["family"] in ("xgboost", "rf", "lstm")
+        assert entry["family"] in ALL_FAMILIES
 
 
 # ─── Filename-prefix regression tests ────────────────────────

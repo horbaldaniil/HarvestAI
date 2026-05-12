@@ -1,15 +1,44 @@
-import { Loader2, AlertTriangle } from "lucide-react";
+import { useState } from "react";
+import { Loader2, AlertTriangle, Download } from "lucide-react";
+import { toast } from "sonner";
 
+import { downloadMethodologyReport } from "@/api/methodology";
 import { AppShell } from "@/components/layout/AppShell";
 import { AlgorithmComparisonTable } from "@/components/methodology/AlgorithmComparisonTable";
+import { AlgorithmLeaderboard } from "@/components/methodology/AlgorithmLeaderboard";
+import { CalibrationPlot } from "@/components/methodology/CalibrationPlot";
+import { GlobalShapSummary } from "@/components/methodology/GlobalShapSummary";
+import { LearningCurves } from "@/components/methodology/LearningCurves";
 import { MetricsCharts } from "@/components/methodology/MetricsCharts";
 import { OblastCoverageMap } from "@/components/methodology/OblastCoverageMap";
+import { OblastResidualMap } from "@/components/methodology/OblastResidualMap";
+import { PartialDependenceCharts } from "@/components/methodology/PartialDependenceCharts";
+import { PerCropResidualScatter } from "@/components/methodology/PerCropResidualScatter";
+import { V4AblationChart } from "@/components/methodology/V4AblationChart";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMethodologyOverview } from "@/hooks/useMethodology";
 
 export function MethodologyPage() {
   const { data, isLoading, error } = useMethodologyOverview();
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      // Default (wheat, stack) — the page-level button doesn't expose
+      // selectors; users wanting other combos can curl the endpoint
+      // directly. Sensible default for thesis-defense moment.
+      await downloadMethodologyReport("wheat", "stack");
+      toast.success("Методологію PDF завантажено");
+    } catch (err) {
+      console.error(err);
+      toast.error("Не вдалося завантажити PDF");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -36,12 +65,29 @@ export function MethodologyPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <header>
-          <h1 className="text-3xl font-bold tracking-tight">Методологія</h1>
-          <p className="text-muted-foreground">
-            Джерела даних, алгоритми, метрики — повна прозорість ML-стеку
-            HarvestAI для академічного аудиту.
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Методологія</h1>
+            <p className="text-muted-foreground">
+              Джерела даних, алгоритми, метрики — повна прозорість ML-стеку
+              HarvestAI для академічного аудиту.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
+            className="shrink-0"
+            title="Завантажити повну методологію як PDF (wheat × stack за замовчуванням)"
+          >
+            {downloadingPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            <span className="ml-2">PDF</span>
+          </Button>
         </header>
 
         <Tabs defaultValue="data">
@@ -49,6 +95,10 @@ export function MethodologyPage() {
             <TabsTrigger value="data">Дані</TabsTrigger>
             <TabsTrigger value="algorithms">Алгоритми</TabsTrigger>
             <TabsTrigger value="metrics">Метрики</TabsTrigger>
+            <TabsTrigger value="leaderboard">Лідерборд</TabsTrigger>
+            <TabsTrigger value="residuals">Карта помилок</TabsTrigger>
+            <TabsTrigger value="explainability">Інтерпретованість</TabsTrigger>
+            <TabsTrigger value="learning">Криві навчання</TabsTrigger>
             <TabsTrigger value="discussion">Чесна оцінка</TabsTrigger>
           </TabsList>
 
@@ -81,25 +131,80 @@ export function MethodologyPage() {
             <OblastCoverageMap />
           </TabsContent>
 
-          <TabsContent value="algorithms">
+          <TabsContent value="algorithms" className="space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Порівняння алгоритмів</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <p className="text-muted-foreground">
-                  Тренуємо три родини моделей на однаковому наборі ознак
-                  (17 фіч: 11 вегетаційних + 4 погодних + 2 геопросторових).
-                  Це чесний methods-section: можна оцінити чи додаткова
-                  складність LSTM/трансформера виправдана у нашому контексті.
+                  Шість родин моделей на однаковому наборі ознак
+                  (17 фіч: 11 вегетаційних + 4 погодних + 2 геопросторових):
+                  Random Forest, XGBoost, LightGBM, CatBoost, LSTM та
+                  Stacked Ensemble (Ridge meta-learner). Per-crop drill-down
+                  з sparkline RepeatedKFold(5×3) варіації — компактна
+                  ілюстрація bias/variance trade-off між моделями.
                 </p>
                 <AlgorithmComparisonTable models={data.models} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="metrics">
+          <TabsContent value="metrics" className="space-y-4">
             <MetricsCharts models={data.models} />
+            <CalibrationPlot />
+          </TabsContent>
+
+          <TabsContent value="leaderboard" className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Усі натреновані моделі v4 (5 family × 13 культур) в одній
+              сортовній таблиці. Стандартний DS-pattern: один рядок на
+              (культура × модель), стовпці —{" "}
+              <strong>test R², RMSE, MAE, MAPE, LOOCV R²</strong> та
+              RepeatedKFold(5×3) варіація. Натисніть на заголовок щоб
+              відсортувати; використовуйте фільтри щоб звузити
+              перегляд.
+            </p>
+            <V4AblationChart />
+            <AlgorithmLeaderboard />
+          </TabsContent>
+
+          <TabsContent value="residuals" className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Mean absolute residual на 2023 test-split, агреговано по
+              областях. Карта показує <em>де</em> модель помиляється
+              найбільше; scatter показує <em>як саме</em> вона помиляється
+              (over-/under-prediction). Разом — найсильніший візуальний
+              аргумент про spatial generalisation
+              (Roberts et al. 2017).
+            </p>
+            <OblastResidualMap />
+            <PerCropResidualScatter />
+          </TabsContent>
+
+          <TabsContent value="explainability" className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Три незалежні підходи до інтерпретованості:{" "}
+              <strong>SHAP TreeExplainer</strong> (Lundberg &amp; Lee 2017),{" "}
+              <strong>Permutation Importance</strong> (Breiman 2001) та{" "}
+              <strong>1-D Partial Dependence Plots</strong> (Friedman 2001).
+              Якщо всі три виділяють однакові топ-фічі — модель справді
+              на них опирається, а не "вгадує" статистичні корелянти.
+              PDP додатково показує <em>напрямок</em> впливу (монотонний vs
+              U-shape vs пороговий).
+            </p>
+            <GlobalShapSummary />
+            <PartialDependenceCharts />
+          </TabsContent>
+
+          <TabsContent value="learning" className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Test R² як функція обсягу тренувальних даних. Якщо крива
+              ще піднімається на 100 % — додавання даних допоможе;
+              якщо плато — bias-limited (треба інші фічі, не більше
+              рядків).
+            </p>
+            <LearningCurves />
           </TabsContent>
 
           <TabsContent value="discussion">

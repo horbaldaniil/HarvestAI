@@ -35,6 +35,13 @@ dependencies = [
     "pandas>=2.2.3",
     "scikit-learn>=1.5.2",
     "xgboost>=2.1.2",
+    # Week 9 — thesis-grade model expansion: gradient-boosting alternatives
+    # and stacked ensembles that participate in the methodology comparison.
+    # LightGBM ~2× faster than XGBoost; CatBoost handles categorical
+    # features (crop_type, oblast) without one-hot expansion.
+    "lightgbm>=4.5.0",
+    "catboost>=1.2.7",
+    "pyyaml>=6.0",  # build_yield_csv reads Держстат yield YAML
     "rasterio>=1.4.2",
     "shapely>=2.0.6",
     "geopandas>=1.0.1",  # Week 6: cropland-mask geom operations

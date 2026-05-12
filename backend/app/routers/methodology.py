@@ -31,6 +31,41 @@ router = APIRouter(prefix="/api/methodology", tags=["methodology"])
 METRICS_PATH = Path("data/processed/model_metrics_v2.json")
 SAMPLES_PATH = Path("data/processed/oblast_samples.geojson")
 TRAINING_SET_PATH = Path("data/processed/training_set_v2.parquet")
+# Phase 4 v3 deliverables — the scientific metric panel JSON + an
+# overview powering the leaderboard / residual map / SHAP charts.
+EVAL_V3_PATH = Path("data/processed/evaluation_v3.json")
+EVAL_V4_PATH = Path("data/processed/evaluation_v4.json")
+EVAL_V5_PATH = Path("data/processed/evaluation_v5.json")
+EVAL_V5_REAL_PATH = Path("data/processed/evaluation_v5_real_only.json")
+EVAL_V6_PATH = Path("data/processed/evaluation_v6.json")
+EVAL_V7_HYBRID_PATH = Path("data/processed/evaluation_v7_hybrid.json")
+METRICS_V3_PATH = Path("data/processed/model_metrics_v3.json")
+METRICS_V4_PATH = Path("data/processed/model_metrics_v4.json")
+METRICS_V5_PATH = Path("data/processed/model_metrics_v5.json")
+METRICS_V6_PATH = Path("data/processed/model_metrics_v6.json")
+TRAINING_V3_PATH = Path("data/processed/training_set_v3.parquet")
+
+
+def _pick_eval_path() -> Path:
+    """Prefer the v6 (real-only-trained) evaluation when present.
+
+    Order:
+      1. `evaluation_v6.json` — production models trained on real-only
+         Держстат yields (2018-2021), real-to-real chronological eval.
+      2. `evaluation_v5_real_only.json` — same numerical content as v6
+         (it's where v6 metrics were first computed before formal rename).
+      3. `evaluation_v5.json` / `evaluation_v4.json` / `evaluation_v3.json`
+         — legacy fallbacks for back-compat.
+    """
+    if EVAL_V6_PATH.exists():
+        return EVAL_V6_PATH
+    if EVAL_V5_REAL_PATH.exists():
+        return EVAL_V5_REAL_PATH
+    if EVAL_V5_PATH.exists():
+        return EVAL_V5_PATH
+    if EVAL_V4_PATH.exists():
+        return EVAL_V4_PATH
+    return EVAL_V3_PATH
 
 
 # ─── Pydantic schemas ─────────────────────────────────────────
@@ -130,6 +165,119 @@ async def metrics(current_user: CurrentUser) -> dict[str, Any]:
         return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(500, f"metrics file unparseable: {exc}") from exc
+
+
+# ─── Phase 4 v3 endpoints ─────────────────────────────────────
+
+
+@router.get("/evaluation_v3")
+async def evaluation_v3(current_user: CurrentUser) -> dict[str, Any]:
+    """Full Phase-4 scientific metric panel: LOOCV-R²/RMSE, RepeatedKFold
+    variance, MAPE, pinball loss, per-oblast residuals, pred-vs-actual
+    scatter, global SHAP, permutation importance and learning curves —
+    per (crop, family).
+
+    Sourced from `data/processed/evaluation_v4.json` (preferred) or v3
+    fallback, written by `scripts/evaluate_models.py`. The frontend
+    slices this single payload into multiple charts; one round-trip is
+    faster than five smaller endpoints, and the file is small (≈1 MB)."""
+    _ = current_user
+    path = _pick_eval_path()
+    if not path.exists():
+        return {
+            "crops": {},
+            "metadata": {},
+            "note": "Run scripts/evaluate_models.py --version v4 to populate.",
+        }
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(500, f"{path.name} unparseable: {exc}") from exc
+
+
+@router.get("/v7_hybrid")
+async def v7_hybrid(current_user: CurrentUser) -> dict[str, Any]:
+    """v7-hybrid thesis headline — best of {v6, v7+SoilGrids, v7h-hierarchical}
+    per crop.
+
+    Each crop is served by its empirically-best model architecture:
+    cereals (wheat/barley) usually win on v7 (NDVI + weather + SoilGrids);
+    high-variance crops (corn, sunflower, buckwheat, corn-silage) win on
+    v7h (hierarchical oblast-offset model); narrow-variance crops (oats)
+    fall back to plain v7 because hierarchical residual modelling
+    overfits their tiny within-oblast spread.
+
+    Schema is **flat per crop** — `crops[crop] = {selected_version,
+    selected_family, test_r2/mae/rmse/mape, candidates: {v6, v7, v7h}}`.
+    This differs from `/evaluation_v3` (nested by family) which is why
+    it lives on its own endpoint instead of going through
+    `_pick_eval_path()`. Source: `data/processed/evaluation_v7_hybrid.json`
+    written by `scripts/evaluate_v7_hybrid.py`.
+    """
+    _ = current_user
+    if not EVAL_V7_HYBRID_PATH.exists():
+        return {
+            "crops": {},
+            "metadata": {},
+            "note": "Run scripts/evaluate_v7_hybrid.py to populate.",
+        }
+    try:
+        return json.loads(EVAL_V7_HYBRID_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            500, f"{EVAL_V7_HYBRID_PATH.name} unparseable: {exc}"
+        ) from exc
+
+
+@router.get("/leaderboard")
+async def leaderboard(current_user: CurrentUser) -> dict[str, Any]:
+    """Flattened cross-crop leaderboard for the AlgorithmLeaderboard UI.
+
+    Each row is one (crop, family) entry with the headline metrics:
+    test R², test MAE, test RMSE, MAPE, LOOCV-R², repeated-K-fold mean ± σ.
+    The frontend sorts and filters this client-side.
+
+    Reading from the Phase-4 eval JSON keeps a single source of truth
+    rather than recomputing summaries in the router.
+    """
+    _ = current_user
+    path = _pick_eval_path()
+    if not path.exists():
+        return {"rows": [], "note": "Run scripts/evaluate_models.py to populate."}
+    try:
+        eval_payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(500, f"{path.name} unparseable: {exc}") from exc
+
+    rows: list[dict[str, Any]] = []
+    for crop, by_family in eval_payload.get("crops", {}).items():
+        for family, body in by_family.items():
+            if not isinstance(body, dict) or body.get("skipped"):
+                continue
+            test = body.get("test") or {}
+            loocv = body.get("loocv_oblast") or {}
+            kfold = body.get("repeated_kfold_5x3") or {}
+            rows.append({
+                "crop": crop,
+                "family": family,
+                "n_test": body.get("n_test"),
+                "n_train": body.get("n_train"),
+                "test_r2": test.get("r2"),
+                "test_rmse": test.get("rmse"),
+                "test_mae": test.get("mae"),
+                "test_mape": test.get("mape"),
+                "loocv_r2": loocv.get("r2"),
+                "loocv_rmse": loocv.get("rmse"),
+                "kfold_r2_mean": kfold.get("r2_mean"),
+                "kfold_r2_std": kfold.get("r2_std"),
+                "pinball_q05": body.get("pinball_loss_q05"),
+                "pinball_q95": body.get("pinball_loss_q95"),
+                "interval_coverage_90pct": body.get("interval_coverage_90pct"),
+            })
+    return {
+        "rows": rows,
+        "metadata": eval_payload.get("metadata", {}),
+    }
 
 
 @router.get("/coverage", response_model=CoverageResponse)

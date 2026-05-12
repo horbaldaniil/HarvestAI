@@ -1,13 +1,14 @@
 """Model registry — loads yield models at FastAPI startup.
 
-Supports multiple algorithm families (XGBoost / RandomForest / LSTM) and
-versions per crop. The default lookup returns the "preferred" model per crop
-following this order:
+Supports multiple algorithm families and versions per crop. The default
+lookup returns the "preferred" model per crop following this order:
   1. settings.active_model_family (if set and present)
-  2. XGBoost v2 (real Sentinel-2 features) if available
-  3. XGBoost v1 (synthesised NDVI fallback)
-  4. RandomForest v1 baseline
-  5. None — predictions disabled for that crop
+  2. Stack v3 (best generalisation per Wolpert 1992) if available
+  3. CatBoost v3 → LightGBM v3 → XGBoost v3 → RandomForest v3
+  4. XGBoost v2 (real Sentinel-2 features, v3-era ablation baseline)
+  5. XGBoost v1 (synthesised NDVI fallback)
+  6. RandomForest v1 baseline
+  7. None — predictions disabled for that crop
 
 LSTM models live alongside but are NOT used by default for runtime tabular
 inference: the LSTM expects a (T=22, F=8) time-series input, while the rest
@@ -29,23 +30,89 @@ from app.db.models.enums import CropType
 
 log = logging.getLogger(__name__)
 
-AlgorithmFamily = Literal["xgboost", "rf", "lstm"]
-ALL_FAMILIES: tuple[AlgorithmFamily, ...] = ("xgboost", "rf", "lstm")
-# Filenames use the short `xgb` prefix (matches the python package name and
-# v1 history); the public-facing family identifier is the more descriptive
-# `xgboost`. Mapping kept in one place so both load and save agree.
+AlgorithmFamily = Literal["xgboost", "rf", "lstm", "lightgbm", "catboost", "stack"]
+ALL_FAMILIES: tuple[AlgorithmFamily, ...] = (
+    "xgboost", "rf", "lstm", "lightgbm", "catboost", "stack",
+)
+# Filenames use short prefixes for python-package alignment + history:
+#   xgboost → "xgb" (v1/v2/v3 history)
+#   lightgbm → "lgbm"  catboost → "cat"  stack → "stack"
 FAMILY_FILE_PREFIX: dict[AlgorithmFamily, str] = {
     "xgboost": "xgb",
     "rf": "rf",
     "lstm": "lstm",
+    "lightgbm": "lgbm",
+    "catboost": "cat",
+    "stack": "stack",
 }
+
+# Tree-based families that SHAP TreeExplainer supports out of the box.
+# RF / XGB / LGBM / CatBoost all qualify; "stack" is a Ridge over OOF
+# predictions of the four tree models, so SHAP at the stack level isn't
+# meaningful (the meta-input space ≠ the original 17 features).
+TREE_FAMILIES: frozenset[AlgorithmFamily] = frozenset({
+    "xgboost", "rf", "lightgbm", "catboost",
+})
+
 # Order in which we pick a default model for a crop if `active_model_family`
-# isn't set. XGBoost v2 (real Sentinel-2 features) wins over v1 (synthesised).
+# isn't set. Stack v4 wins because v4 features (crop-specific weather +
+# weather-conditioned yields) measurably improve R² across most crops.
+# v3 stays as fallback; v2/v1 for the ablation study.
 DEFAULT_PREFERENCE: tuple[tuple[AlgorithmFamily, str], ...] = (
+    # v7 = real-only training + SoilGrids soil features (30 features total).
+    # v7h = hierarchical (predicts yield deviation from oblast mean).
+    # Both v7 variants beat v6 for different crop subsets; runtime
+    # selection happens via best-of-both eval.
+    ("stack", "v7"),
+    ("catboost", "v7"),
+    ("lightgbm", "v7"),
+    ("xgboost", "v7"),
+    ("rf", "v7"),
+    ("stack", "v7h"),
+    ("catboost", "v7h"),
+    ("lightgbm", "v7h"),
+    ("xgboost", "v7h"),
+    ("rf", "v7h"),
+    # v6 = production models trained on REAL-ONLY Держстат yields
+    # (2018-2021, chronological split train 2018-19 / val 2020 / test 2021).
+    # No synthetic confound — these are the thesis-defense headline.
+    # v5 = mixed real+synthetic trained, kept for ablation history.
+    ("stack", "v6"),
+    ("catboost", "v6"),
+    ("lightgbm", "v6"),
+    ("xgboost", "v6"),
+    ("rf", "v6"),
+    ("stack", "v5"),
+    ("catboost", "v5"),
+    ("lightgbm", "v5"),
+    ("xgboost", "v5"),
+    ("rf", "v5"),
+    ("stack", "v4"),
+    ("catboost", "v4"),
+    ("lightgbm", "v4"),
+    ("xgboost", "v4"),
+    ("rf", "v4"),
+    ("stack", "v3"),
+    ("catboost", "v3"),
+    ("lightgbm", "v3"),
+    ("xgboost", "v3"),
+    ("rf", "v3"),
     ("xgboost", "v2"),
     ("xgboost", "v1"),
     ("rf", "v1"),
 )
+
+# Versions we attempt to discover for every (crop, family) pair on startup.
+# Listed explicitly so a missing v6 file just leaves the registry on v5,
+# rather than walking the directory and risking accidental loads of
+# half-trained artifacts a developer left behind.
+DISCOVERY_VERSIONS: dict[AlgorithmFamily, tuple[str, ...]] = {
+    "xgboost": ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v7h"),
+    "rf": ("v1", "v3", "v4", "v5", "v6", "v7", "v7h"),
+    "lightgbm": ("v3", "v4", "v5", "v6", "v7", "v7h"),
+    "catboost": ("v3", "v4", "v5", "v6", "v7", "v7h"),
+    "stack": ("v3", "v4", "v5", "v6", "v7", "v7h"),
+}
 
 
 class ModelRegistry:
@@ -84,9 +151,9 @@ class ModelRegistry:
             return
 
         for crop in CropType:
-            self._try_load_joblib(crop, "xgboost", "v1", models_dir)
-            self._try_load_joblib(crop, "xgboost", "v2", models_dir)
-            self._try_load_joblib(crop, "rf", "v1", models_dir)
+            for family, versions in DISCOVERY_VERSIONS.items():
+                for version in versions:
+                    self._try_load_joblib(crop, family, version, models_dir)
             self._try_load_lstm(crop, "v1", models_dir)
 
         norms_path = Path("data/processed/seasonal_norms.json")
@@ -118,13 +185,17 @@ class ModelRegistry:
         key = (crop, family, version)
         self._models[key] = payload
 
-        # SHAP TreeExplainer is only relevant for tree-based regressors. RF/XGB
-        # both qualify; for non-tree families (none yet) we just skip the build.
-        if family in ("xgboost", "rf"):
-            try:
-                self._explainers[key] = shap.TreeExplainer(payload["model"])
-            except Exception as exc:  # noqa: BLE001
-                log.warning("SHAP explainer failed for %s: %s", path.name, exc)
+        # SHAP TreeExplainer is only relevant for tree-based regressors.
+        # v3 XGBoost serialises under {"point": <regressor>, "q_low": ...,
+        # "q_high": ...}; v1/v2 + RF/LGBM/CatBoost serialise under
+        # {"model": <regressor>}. We pick whichever is present.
+        if family in TREE_FAMILIES:
+            estimator = payload.get("point") or payload.get("model")
+            if estimator is not None:
+                try:
+                    self._explainers[key] = shap.TreeExplainer(estimator)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("SHAP explainer failed for %s: %s", path.name, exc)
 
         meta_path = models_dir / f"yield_{prefix}_{crop.value}_{version}.meta.json"
         if meta_path.exists():
