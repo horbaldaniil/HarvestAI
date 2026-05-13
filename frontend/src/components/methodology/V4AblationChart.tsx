@@ -90,21 +90,23 @@ const V6_BASELINE_BEST_R2: Record<string, number> = {
 
 // Frozen v7-hybrid best R² — best-of-N across v6 / v7 (with SoilGrids) /
 // v7h (hierarchical oblast-offset). Read from `evaluation_v7_hybrid.json`.
-// This is the thesis-defense headline.
+// Updated after CatBoost was removed from the stack ensemble: stack-of-3
+// (rf/xgb/lgbm) replaces the previous stack-of-4, so several crops shift
+// to a different winner. This is the thesis-defense headline post-cleanup.
 const V7_HYBRID_BEST_R2: Record<string, number> = {
-  wheat: 0.587,         // v7/rf — SoilGrids paid off
-  corn: 0.727,          // v7h/xgboost — hierarchical
-  sunflower: 0.749,     // v7h/catboost — hierarchical
-  soybean: 0.399,       // v7/catboost — soil features helped
-  rapeseed: 0.353,      // v7h/lightgbm
-  barley: 0.506,        // v7/stack
-  rye: 0.158,           // v7/stack
-  oats: -0.567,         // v7/stack — still negative but improved
-  buckwheat: 0.572,     // v7h/xgboost — hierarchical big win
-  peas: 0.306,          // v7/stack
-  sugar_beet: 0.022,    // v7/catboost — finally positive
-  potato: 0.368,        // v7/xgboost — SoilGrids helped tubers
-  corn_silage: 0.521,   // v7h/lightgbm
+  wheat: 0.462,         // v6/rf — stack lost CatBoost advantage
+  corn: 0.466,          // v6/xgboost
+  sunflower: 0.681,     // v7/stack
+  soybean: 0.121,       // v6/rf
+  rapeseed: 0.187,      // v7h/stack
+  barley: 0.462,        // v7/stack
+  rye: 0.149,           // v7/stack
+  oats: -0.492,         // v7/stack — still negative
+  buckwheat: 0.488,     // v7h/stack — hierarchical anchored
+  peas: 0.317,          // v7/stack
+  sugar_beet: -0.007,   // v6/xgboost
+  potato: 0.174,        // v6/xgboost
+  corn_silage: 0.372,   // v7/stack
 };
 
 const CROP_LABEL_UK: Record<string, string> = {

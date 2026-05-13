@@ -125,12 +125,20 @@ class DashboardFieldRow(BaseModel):
     # Resolved oblast (Ukrainian display name) the field's centroid lands in.
     # None if the centroid is outside Ukraine or the oblast geojson is missing.
     oblast_name: str | None = None
-    # Optional oblast-level NDVI mean used for the "your field vs oblast"
-    # comparison column. Present only when training_set_v2 covers this oblast.
+    # Legacy NDVI baseline — kept for the risk-score path inside
+    # compute_risk_score. User-facing comparison switched to yield-based
+    # in v7 (see oblast_avg_yield_tha below).
     oblast_avg_ndvi: float | None = None
-    # Which year the baseline NDVI was sourced from (most-recent year in
-    # the Week 6 parquet). Lets the UI label the comparison honestly.
     oblast_baseline_year: int | None = None
+    # Per-(oblast, crop) mean Держстат yield (t/ha) — populated from
+    # training_set_v3.parquet's `is_real_yield=True` rows.
+    # Powers the dashboard's "Поле vs середнє по області" comparison
+    # column. None when the (oblast, crop) combo has no published row.
+    oblast_avg_yield_tha: float | None = None
+    # Year the yield baseline came from (typically 2021, sometimes
+    # older if 2021 is missing for that crop). Lets the UI label the
+    # comparison honestly ("Середнє по області, 2021").
+    oblast_avg_yield_year: int | None = None
     # GeoJSON Polygon for the mini-map on the dashboard. Allows the UI to
     # render all fields in one round-trip without hitting /api/fields.
     geometry: dict | None = None

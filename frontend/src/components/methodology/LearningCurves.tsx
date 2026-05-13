@@ -30,7 +30,6 @@ const FAMILY_COLOUR: Record<string, string> = {
   rf:        "#5e7d36",
   xgboost:   "#3b82f6",
   lightgbm:  "#a16207",
-  catboost:  "#dc2626",
   stack:     "#9333ea",
   lstm:      "#0ea5e9",
 };

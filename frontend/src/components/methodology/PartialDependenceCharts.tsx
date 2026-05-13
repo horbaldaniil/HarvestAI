@@ -150,8 +150,8 @@ export function PartialDependenceCharts() {
             <strong>PDP не визначено для Stacked Ensemble.</strong>
             <br />
             Stack виходить через Ridge meta-learner поверх OOF-prediction базових моделей —
-            sklearn повертає кривy для meta-input space (4 base-prediction виміри), не для
-            оригінальних 17 фіч. Оберіть RF / XGBoost / LightGBM / CatBoost.
+            sklearn повертає кривy для meta-input space (3 base-prediction виміри), не для
+            оригінальних 17 фіч. Оберіть RF / XGBoost / LightGBM.
           </div>
         ) : features.length === 0 ? (
           <div className="py-8 text-center text-sm text-muted-foreground">

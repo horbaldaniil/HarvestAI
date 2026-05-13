@@ -1,7 +1,8 @@
 """Tests for the v3 expansion of `app/ml/registry.py`.
 
-Phase 4 added three new families (lightgbm / catboost / stack) and a
-new version (v3) across the board. These tests verify:
+Phase 4 added two new families (lightgbm / stack) and a new version
+(v3) across the board. (CatBoost was a third addition in Phase 4 but
+was removed in the post-v7 cleanup.) These tests verify:
 
   - the AlgorithmFamily Literal accepts the new values;
   - FAMILY_FILE_PREFIX has matching short forms;
@@ -31,8 +32,10 @@ from app.db.models.enums import CropType
 
 def test_all_families_includes_new_v3_families():
     assert "lightgbm" in ALL_FAMILIES
-    assert "catboost" in ALL_FAMILIES
     assert "stack" in ALL_FAMILIES
+    # CatBoost was removed in the post-v7 cleanup — it must NOT be
+    # discoverable through the registry anymore.
+    assert "catboost" not in ALL_FAMILIES
 
 
 def test_family_file_prefix_covers_all_families():
@@ -40,8 +43,10 @@ def test_family_file_prefix_covers_all_families():
         assert fam in FAMILY_FILE_PREFIX, f"FAMILY_FILE_PREFIX missing {fam}"
     # Specific spot-checks for filenames that exist on disk
     assert FAMILY_FILE_PREFIX["lightgbm"] == "lgbm"
-    assert FAMILY_FILE_PREFIX["catboost"] == "cat"
     assert FAMILY_FILE_PREFIX["stack"] == "stack"
+    # CatBoost prefix ("cat") is gone — model files were deleted in
+    # the post-v7 cleanup along with the package itself.
+    assert "catboost" not in FAMILY_FILE_PREFIX
 
 
 def test_default_preference_stack_v3_first():
@@ -67,16 +72,18 @@ def test_tree_families_excludes_lstm_and_stack():
     """LSTM (neural) and Stack (Ridge over OOF) are not SHAP-TreeExplainer-able."""
     assert "lstm" not in TREE_FAMILIES
     assert "stack" not in TREE_FAMILIES
-    # All four tree models in:
-    assert TREE_FAMILIES == frozenset({"xgboost", "rf", "lightgbm", "catboost"})
+    # Three tree models remain after CatBoost removal:
+    assert TREE_FAMILIES == frozenset({"xgboost", "rf", "lightgbm"})
 
 
 def test_discovery_versions_contains_v3_and_v4_for_all_new_families():
     """Phase-4 added v3, Week-10 v4 ablation extended each family with
-    a v4 entry. Both should be discoverable."""
-    for family in ("xgboost", "rf", "lightgbm", "catboost", "stack"):
+    a v4 entry. Both should be discoverable. CatBoost is excluded —
+    removed in the post-v7 cleanup."""
+    for family in ("xgboost", "rf", "lightgbm", "stack"):
         assert "v3" in DISCOVERY_VERSIONS[family], f"{family} missing v3"
         assert "v4" in DISCOVERY_VERSIONS[family], f"{family} missing v4"
+    assert "catboost" not in DISCOVERY_VERSIONS
 
 
 # ─── Live load (only runs if v3 artifacts exist) ───────────
@@ -123,8 +130,10 @@ def test_registry_lists_v3_models_in_inventory():
     inv = r.list_available()
     v3_entries = [e for e in inv if e["version"] == "v3"]
     families_in_v3 = {e["family"] for e in v3_entries}
-    # All five v3 families should be represented if trainer ran cleanly.
-    assert families_in_v3 >= {"xgboost", "rf", "lightgbm", "catboost", "stack"}
+    # Four v3 families should be represented if the trainer ran cleanly
+    # (CatBoost was a fifth family before the post-v7 cleanup).
+    assert families_in_v3 >= {"xgboost", "rf", "lightgbm", "stack"}
+    assert "catboost" not in families_in_v3
 
 
 @pytest.mark.skipif(

@@ -1,13 +1,47 @@
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   AttributionControl,
   LayerGroup,
   LayersControl,
   MapContainer,
   TileLayer,
+  useMap,
 } from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import { useTranslation } from "react-i18next";
+
+
+/**
+ * Headless watcher that calls `map.invalidateSize()` whenever the
+ * map's container element changes size — typically when the FieldsPage
+ * BottomPanel toggles between 48 px collapsed and 340 px expanded, but
+ * also when the browser window itself resizes.
+ *
+ * Leaflet caches viewport dimensions at mount-time; without this nudge,
+ * any pixels that appear after a resize render as grey because the
+ * tile renderer doesn't know they exist. The recommended fix is the
+ * official `invalidateSize()` call — cheap (a couple of arithmetic
+ * ops plus a tile-set intersection), safe to spam during a 300 ms CSS
+ * transition.
+ *
+ * Lives inside FieldMap so every consumer (FieldsPage, DashboardMap,
+ * methodology maps) gets it for free. Renders nothing visible.
+ */
+function MapResizeWatcher() {
+  const map = useMap();
+  useEffect(() => {
+    const el = map.getContainer();
+    // ResizeObserver is in every browser we target, but the guard keeps
+    // the SSR/test environment happy and falls back to a no-op.
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      map.invalidateSize({ animate: false });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [map]);
+  return null;
+}
 
 // Center of Ukraine — used as initial map center.
 export const UKRAINE_CENTER: LatLngExpression = [49.0, 31.5];
@@ -40,6 +74,9 @@ export function FieldMap({
       // provider credits (required by OSM ODbL + CartoDB ToS).
       attributionControl={false}
     >
+      {/* First child so it mounts immediately and starts observing
+          the container BEFORE any tile layer attempts its first render. */}
+      <MapResizeWatcher />
       <AttributionControl prefix={false} position="bottomright" />
       <LayersControl position="topright">
         <LayersControl.BaseLayer checked name={t("map.baseLayer.osm")}>

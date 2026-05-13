@@ -30,8 +30,17 @@ export interface DashboardFieldRow {
   risk_score: number;
   risk_factors: string[];
   oblast_name: string | null;
+  /** Legacy NDVI baseline — kept for back-compat; user UI now uses yield. */
   oblast_avg_ndvi: number | null;
   oblast_baseline_year: number | null;
+  /**
+   * Mean Держстат yield (t/ha) for this field's (oblast, crop). Populated
+   * from `training_set_v3.parquet` real-yield rows. `null` when no
+   * published row exists for the combo.
+   */
+  oblast_avg_yield_tha: number | null;
+  /** Year the yield baseline came from (typically 2021). */
+  oblast_avg_yield_year: number | null;
   geometry: GJPolygon | null;
 }
 

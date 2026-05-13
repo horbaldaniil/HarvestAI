@@ -8,6 +8,7 @@ import { ALL_CROPS } from "@/api/fields";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCropPrices } from "@/hooks/useCropPrices";
+import { currencyLabelUk } from "@/lib/utils";
 
 interface Props {
   fields: DashboardFieldRow[];
@@ -70,7 +71,7 @@ export function IncomeProjectionCard({ fields }: Props) {
         {pricesSet && breakdown?.hasAnyData ? (
           <>
             <div className="text-3xl font-bold tabular-nums">
-              {formatMoney(breakdown.total)} {currency}
+              {formatMoney(breakdown.total)} {currencyLabelUk(currency)}
             </div>
             <div className="mt-2 space-y-1 text-xs text-muted-foreground">
               {(Object.entries(breakdown.perCrop) as [CropType, { yield_t: number; income: number }][])
@@ -79,7 +80,7 @@ export function IncomeProjectionCard({ fields }: Props) {
                   <div key={crop} className="flex justify-between">
                     <span>{t(`fields.crops.${crop}`)}</span>
                     <span className="tabular-nums">
-                      {v.yield_t.toFixed(1)} т · {formatMoney(v.income)} {currency}
+                      {v.yield_t.toFixed(1)} т · {formatMoney(v.income)} {currencyLabelUk(currency)}
                     </span>
                   </div>
                 ))}

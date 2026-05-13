@@ -14,7 +14,7 @@ This script measures the **honest** real-to-real generalisation:
     2018-2021).
   - Chronological split: train on 2018-2019 (real), val on 2020 (real),
     test on 2021 (real).
-  - Train all 5 model families (RF, XGBoost, LightGBM, CatBoost, Stack).
+  - Train 4 model families (RF, XGBoost, LightGBM, Stack).
   - Report test R²/MAE/RMSE plus the standard scientific metric panel.
 
 The pure-real numbers are what we cite in the thesis defence; the
@@ -91,7 +91,6 @@ def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
 def _build_families():
     import lightgbm as lgb
     import xgboost as xgb
-    from catboost import CatBoostRegressor
     from sklearn.ensemble import StackingRegressor
     from sklearn.model_selection import KFold
 
@@ -105,8 +104,6 @@ def _build_families():
         ("lgbm", lgb.LGBMRegressor(n_estimators=400, num_leaves=31,
                                    learning_rate=0.05, random_state=42,
                                    n_jobs=-1, verbose=-1)),
-        ("cat", CatBoostRegressor(iterations=400, depth=6, learning_rate=0.05,
-                                  random_state=42, verbose=False)),
     ]
     return {
         "rf": RandomForestRegressor(n_estimators=300, min_samples_leaf=2,
@@ -119,8 +116,6 @@ def _build_families():
         "lightgbm": lgb.LGBMRegressor(n_estimators=400, num_leaves=31,
                                       learning_rate=0.05, random_state=42,
                                       n_jobs=-1, verbose=-1),
-        "catboost": CatBoostRegressor(iterations=400, depth=6, learning_rate=0.05,
-                                      random_state=42, verbose=False),
         "stack": StackingRegressor(
             estimators=base_estimators,
             final_estimator=Ridge(alpha=1.0),
@@ -220,7 +215,7 @@ def main() -> int:
             "split": f"train={'+'.join(map(str, TRAIN_YEARS))} val={VAL_YEAR} test={TEST_YEAR}",
             "feature_names": list(FEATURE_NAMES),
             "n_features": len(FEATURE_NAMES),
-            "families": ["rf", "xgboost", "lightgbm", "catboost", "stack"],
+            "families": ["rf", "xgboost", "lightgbm", "stack"],
             "n_real_rows": int(len(real)),
         },
         "crops": {},

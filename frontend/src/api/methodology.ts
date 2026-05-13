@@ -5,7 +5,6 @@ export type AlgorithmFamily =
   | "rf"
   | "lstm"
   | "lightgbm"
-  | "catboost"
   | "stack";
 
 /**

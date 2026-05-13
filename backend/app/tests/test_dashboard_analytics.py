@@ -11,12 +11,14 @@ from app.services.dashboard_analytics import (
     compute_risk_score,
     find_oblast_for_centroid,
     oblast_avg_ndvi,
+    oblast_avg_yield,
     oblast_baseline_year,
     oblast_name_uk,
     phenology_calendar,
     phenology_phase,
     reset_oblast_baseline_cache,
     reset_oblast_polygons_cache,
+    reset_oblast_yield_baseline_cache,
 )
 
 
@@ -249,6 +251,82 @@ def test_oblast_avg_ndvi_unknown_oblast_returns_none():
 def test_oblast_avg_ndvi_none_input_returns_none():
     assert oblast_avg_ndvi(None, 2023) is None
     assert oblast_baseline_year(None) is None
+
+
+# ─── Per-(oblast, crop) Держстат yield baseline ────────────
+
+
+_V3_PARQUET_PATH = Path("data/processed/training_set_v3.parquet")
+
+
+@pytest.fixture(autouse=True)
+def _reset_yield_cache():
+    """Each yield-baseline test starts with a clean lru_cache so a
+    previous test's parquet read can't leak through."""
+    reset_oblast_yield_baseline_cache()
+    yield
+    reset_oblast_yield_baseline_cache()
+
+
+@pytest.mark.skipif(
+    not _V3_PARQUET_PATH.exists(),
+    reason="training_set_v3.parquet missing",
+)
+def test_oblast_avg_yield_returns_wheat_baseline_for_vinnytsia():
+    """Vinnytsia is fully covered by the Держstat 2018–2021 dataset.
+    Wheat yields there typically range 3.5–5.5 t/ha — sanity-bound the
+    lookup to that band."""
+    val, year = oblast_avg_yield("Vinnytsia", "wheat", 2021)
+    assert val is not None
+    assert year is not None
+    assert 2.0 < val < 7.0
+    assert year in {2018, 2019, 2020, 2021}
+
+
+@pytest.mark.skipif(
+    not _V3_PARQUET_PATH.exists(),
+    reason="training_set_v3.parquet missing",
+)
+def test_oblast_avg_yield_accepts_natural_earth_spelling():
+    """Crucial regression: `find_oblast_for_centroid` returns Natural
+    Earth spellings ("L'viv"), while the v3 parquet stores "Lviv".
+    `iso_from_any_name` normalises both sides; the lookup must work
+    regardless of which spelling the caller passes in."""
+    a, _ = oblast_avg_yield("L'viv", "wheat", 2021)
+    b, _ = oblast_avg_yield("Lviv", "wheat", 2021)
+    # Both inputs map to the same ISO code → identical lookup result.
+    assert a == b
+    assert a is not None
+
+
+@pytest.mark.skipif(
+    not _V3_PARQUET_PATH.exists(),
+    reason="training_set_v3.parquet missing",
+)
+def test_oblast_avg_yield_falls_back_to_latest_year():
+    """Requesting a year that isn't in the dataset (2099) must
+    silently fall back to the most-recent year available for that
+    (oblast, crop), so the UI always gets a usable baseline when
+    one exists in any year."""
+    val, year = oblast_avg_yield("Vinnytsia", "wheat", 2099)
+    assert val is not None
+    assert year is not None
+    assert year < 2099
+
+
+def test_oblast_avg_yield_unknown_oblast_returns_none():
+    """Atlantis isn't in the dataset — must degrade gracefully."""
+    val, year = oblast_avg_yield("Atlantis", "wheat", 2021)
+    assert val is None
+    assert year is None
+
+
+def test_oblast_avg_yield_none_inputs_return_none():
+    """Both oblast and crop are required; either being None short-
+    circuits to (None, None) without raising or hitting the parquet."""
+    assert oblast_avg_yield(None, "wheat", 2021) == (None, None)
+    assert oblast_avg_yield("Vinnytsia", None, 2021) == (None, None)
+    assert oblast_avg_yield(None, None, None) == (None, None)
 
 
 # ─── Ukrainian display names ────────────────────────────────

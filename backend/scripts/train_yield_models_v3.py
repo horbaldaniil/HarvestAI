@@ -1,7 +1,7 @@
 """Train 5 yield-regressor families per crop on `training_set_v3.parquet`.
 
-Families: RF, XGBoost (point + q=0.05/q=0.95), LightGBM, CatBoost, and a
-StackingRegressor combining all four with a Ridge meta-learner. LSTM is
+Families: RF, XGBoost (point + q=0.05/q=0.95), LightGBM, and a
+StackingRegressor combining all three with a Ridge meta-learner. LSTM is
 kept at v1 because its 22 × 8 sequence schema is incompatible with the
 tabular v3 feature matrix; the methodology UI surfaces it alongside.
 
@@ -73,7 +73,7 @@ FEATURE_NAMES: tuple[str, ...] = (
     "centroid_lat", "centroid_lon",
 )
 
-ALL_FAMILIES: tuple[str, ...] = ("rf", "xgboost", "lightgbm", "catboost", "stack")
+ALL_FAMILIES: tuple[str, ...] = ("rf", "xgboost", "lightgbm", "stack")
 
 
 @dataclass
@@ -172,26 +172,8 @@ def _train_lightgbm(X_train: np.ndarray, y_train: np.ndarray,
     return model
 
 
-def _train_catboost(X_train: np.ndarray, y_train: np.ndarray,
-                    X_val: np.ndarray | None = None,
-                    y_val: np.ndarray | None = None) -> Any:
-    from catboost import CatBoostRegressor
-
-    model = CatBoostRegressor(
-        iterations=400, depth=6, learning_rate=0.05,
-        loss_function="RMSE", random_state=42,
-        thread_count=-1, verbose=False,
-    )
-    if X_val is not None:
-        model.fit(X_train, y_train, eval_set=(X_val, y_val),
-                  early_stopping_rounds=30, verbose=False)
-    else:
-        model.fit(X_train, y_train, verbose=False)
-    return model
-
-
 def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray) -> Any:
-    """StackingRegressor: RF + XGB + LGBM + CatBoost → Ridge meta-learner.
+    """StackingRegressor: RF + XGB + LGBM → Ridge meta-learner.
 
     Stacking requires each row to receive *exactly one* OOF prediction
     (a partition), so we use plain `KFold(5, shuffle=True)` here, NOT
@@ -199,10 +181,12 @@ def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray) -> Any:
     partition constraint and rejects repeated folds. Variance estimation
     via `RepeatedKFold(5×3)` is still applied later in `evaluate_models.py`
     on the final fitted stack — separate concern.
+
+    Note: CatBoost was previously the fourth base learner; removed from
+    the project entirely.
     """
     import lightgbm as lgb
     import xgboost as xgb
-    from catboost import CatBoostRegressor
 
     cv = KFold(n_splits=5, shuffle=True, random_state=42)
     base = [
@@ -221,10 +205,6 @@ def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray) -> Any:
             subsample=0.85, colsample_bytree=0.85,
             random_state=42, n_jobs=-1, verbose=-1,
         )),
-        ("cat", CatBoostRegressor(
-            iterations=300, depth=6, learning_rate=0.05,
-            random_state=42, thread_count=-1, verbose=False,
-        )),
     ]
     stack = StackingRegressor(
         estimators=base,
@@ -242,7 +222,7 @@ def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray) -> Any:
 
 def _model_filename(family: str, crop: str) -> str:
     """Stable on-disk naming. `xgb` short form mirrors v1/v2 history."""
-    short = {"xgboost": "xgb", "lightgbm": "lgbm", "catboost": "cat", "rf": "rf", "stack": "stack"}[family]
+    short = {"xgboost": "xgb", "lightgbm": "lgbm", "rf": "rf", "stack": "stack"}[family]
     return f"yield_{short}_{crop}_v3.joblib"
 
 
@@ -322,17 +302,6 @@ def train_one_crop(crop: str, df: pd.DataFrame, families: tuple[str, ...],
                 model = _train_lightgbm(X_train, y_train, X_val, y_val)
                 meta_payload = {"model": model, "features": list(FEATURE_NAMES),
                                 "family": "lightgbm", "version": "v3"}
-                _save_payload(meta_payload, family, crop)
-                metrics = {
-                    "train": _eval_helper(model, X_train, y_train),
-                    "val": _eval_helper(model, X_val, y_val),
-                    "test": _eval_helper(model, X_test, y_test),
-                }
-
-            elif family == "catboost":
-                model = _train_catboost(X_train, y_train, X_val, y_val)
-                meta_payload = {"model": model, "features": list(FEATURE_NAMES),
-                                "family": "catboost", "version": "v3"}
                 _save_payload(meta_payload, family, crop)
                 metrics = {
                     "train": _eval_helper(model, X_train, y_train),

@@ -12,47 +12,69 @@ interface Props {
 interface ComparisonRow {
   field_id: number;
   name: string;
-  current_ndvi: number;
-  oblast_avg_ndvi: number;
+  predicted_tha: number;
+  oblast_avg_yield_tha: number;
   oblast_name: string | null;
   baseline_year: number | null;
-  delta: number;
+  delta_pct: number;
 }
 
 /**
- * Side-by-side: your field's current NDVI vs the Week 6 oblast-aggregated
- * baseline (cropland-mask sampled Sentinel-2). The card teaches three
- * things at once — your value, the regional reference, and the gap.
+ * Side-by-side: this field's predicted yield (from the ML model) vs
+ * the published Держстат mean yield for its (oblast, crop). Three
+ * things at once — your forecast, the regional reality, and the gap
+ * in % terms.
  *
- * Empty-state distinguishes the two reasons a field might be missing:
- *   - we don't yet know the oblast (centroid outside Ukraine / geojson
- *     unavailable) — typically a setup issue;
- *   - we know the oblast but the Week 6 dataset doesn't cover it yet —
- *     a content gap that fills as collect_oblast_s2.py advances.
+ * v7-era rewrite — the previous version compared NDVI peaks (less
+ * meaningful for an end-user agronomist who thinks in t/ha) and was
+ * tied to the legacy v2 parquet's 8-oblast / 3-crop coverage. We now
+ * read the v3 parquet via `oblast_avg_yield()` on the backend (24
+ * oblasts × 13 crops, `is_real_yield=True` filter) so virtually every
+ * field falls inside coverage.
+ *
+ * Empty-state distinguishes three failure modes:
+ *   - no fields at all,
+ *   - centroid doesn't land in any known oblast (geojson gap / outside
+ *     Ukraine),
+ *   - oblast known but no Держстат row for that crop + oblast combo
+ *     (e.g. a niche crop in a small-area oblast that wasn't in the
+ *     2018-2021 published bulletins).
  */
 export function OblastComparisonTable({ fields }: Props) {
   const navigate = useNavigate();
   const rows = useMemo<ComparisonRow[]>(() => {
     return fields
       .filter(
-        (f): f is DashboardFieldRow & { current_ndvi: number; oblast_avg_ndvi: number } =>
-          f.current_ndvi !== null && f.oblast_avg_ndvi !== null,
+        (f): f is DashboardFieldRow & {
+          predicted_tha: number;
+          oblast_avg_yield_tha: number;
+        } =>
+          f.predicted_tha !== null && f.oblast_avg_yield_tha !== null,
       )
-      .map((f) => ({
-        field_id: f.field_id,
-        name: f.name,
-        current_ndvi: f.current_ndvi,
-        oblast_avg_ndvi: f.oblast_avg_ndvi,
-        oblast_name: f.oblast_name,
-        baseline_year: f.oblast_baseline_year,
-        delta: f.current_ndvi - f.oblast_avg_ndvi,
-      }))
-      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+      .map((f) => {
+        // Defensive: denominator can theoretically be 0 / very small —
+        // clamp so we never produce Infinity or absurd % values.
+        const denom = f.oblast_avg_yield_tha > 0 ? f.oblast_avg_yield_tha : 1;
+        const delta_pct = ((f.predicted_tha - f.oblast_avg_yield_tha) / denom) * 100;
+        return {
+          field_id: f.field_id,
+          name: f.name,
+          predicted_tha: f.predicted_tha,
+          oblast_avg_yield_tha: f.oblast_avg_yield_tha,
+          oblast_name: f.oblast_name,
+          baseline_year: f.oblast_avg_yield_year,
+          delta_pct,
+        };
+      })
+      .sort((a, b) => Math.abs(b.delta_pct) - Math.abs(a.delta_pct));
   }, [fields]);
 
-  // Categorise fields without a comparison so we can write a useful empty
-  // state ("no oblast" vs "oblast known but no data").
+  // Categorise fields without a comparison so we can write a useful
+  // empty state. "fieldsWithOblast" means we resolved a centroid →
+  // oblast; "fieldsWithPrediction" means the predict-job has produced
+  // a number we can compare against.
   const fieldsWithOblast = fields.filter((f) => f.oblast_name !== null);
+  const fieldsWithPrediction = fields.filter((f) => f.predicted_tha !== null);
   const baselineYear =
     rows.find((r) => r.baseline_year !== null)?.baseline_year ?? null;
 
@@ -62,7 +84,7 @@ export function OblastComparisonTable({ fields }: Props) {
         <CardTitle className="text-base">Поле vs середнє по області</CardTitle>
         {baselineYear !== null && (
           <p className="text-xs text-muted-foreground">
-            Базова лінія за Sentinel-2 датасет {baselineYear} р.
+            База порівняння — фактичні Держстат-урожаї {baselineYear} р.
           </p>
         )}
       </CardHeader>
@@ -71,6 +93,7 @@ export function OblastComparisonTable({ fields }: Props) {
           <EmptyState
             fieldsTotal={fields.length}
             fieldsWithKnownOblast={fieldsWithOblast.length}
+            fieldsWithPrediction={fieldsWithPrediction.length}
           />
         ) : (
           <>
@@ -79,8 +102,12 @@ export function OblastComparisonTable({ fields }: Props) {
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Поле</th>
                   <th className="px-2 py-2 font-medium">Область</th>
-                  <th className="px-2 py-2 text-right font-medium">Ваш NDVI</th>
-                  <th className="px-2 py-2 text-right font-medium">Область</th>
+                  <th className="px-2 py-2 text-right font-medium">
+                    Прогноз (т/га)
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium">
+                    Область (т/га)
+                  </th>
                   <th className="px-2 py-2 text-right font-medium">Δ</th>
                 </tr>
               </thead>
@@ -99,18 +126,18 @@ export function OblastComparisonTable({ fields }: Props) {
                       </span>
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums">
-                      {r.current_ndvi.toFixed(2)}
+                      {r.predicted_tha.toFixed(1)}
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
-                      {r.oblast_avg_ndvi.toFixed(2)}
+                      {r.oblast_avg_yield_tha.toFixed(1)}
                     </td>
                     <td
                       className={`px-2 py-2 text-right tabular-nums font-medium ${
-                        r.delta > 0 ? "text-emerald-600" : "text-red-600"
+                        r.delta_pct >= 0 ? "text-emerald-600" : "text-red-600"
                       }`}
                     >
-                      {r.delta > 0 ? "+" : ""}
-                      {r.delta.toFixed(2)}
+                      {r.delta_pct >= 0 ? "+" : ""}
+                      {r.delta_pct.toFixed(1)}%
                     </td>
                   </tr>
                 ))}
@@ -118,9 +145,15 @@ export function OblastComparisonTable({ fields }: Props) {
             </table>
             {fields.length > rows.length && (
               <p className="border-t bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
-                Ще {fields.length - rows.length} {plural(fields.length - rows.length, "поле", "поля", "полів")}
-                {" "}не порівнюються: або їх область поза покриттям Week 6
-                датасета, або поточний NDVI ще не зібрано.
+                Ще {fields.length - rows.length}{" "}
+                {plural(
+                  fields.length - rows.length,
+                  "поле",
+                  "поля",
+                  "полів",
+                )}{" "}
+                не порівнюються: ще немає прогнозу або немає
+                Держстат-даних за цю культуру та область.
               </p>
             )}
           </>
@@ -133,9 +166,11 @@ export function OblastComparisonTable({ fields }: Props) {
 function EmptyState({
   fieldsTotal,
   fieldsWithKnownOblast,
+  fieldsWithPrediction,
 }: {
   fieldsTotal: number;
   fieldsWithKnownOblast: number;
+  fieldsWithPrediction: number;
 }) {
   if (fieldsTotal === 0) {
     return (
@@ -148,18 +183,29 @@ function EmptyState({
     return (
       <div className="px-6 py-6 text-sm text-muted-foreground">
         Не вдалося визначити область для жодного поля. Перевірте, що
-        центроїди полів лежать у межах України та що
-        {" "}<code className="rounded bg-muted px-1">backend/data/raw/ukraine_oblasts.geojson</code>
-        {" "}доступний (генерується скриптом{" "}
-        <code className="rounded bg-muted px-1">scripts/download_oblast_geometries.py</code>).
+        центроїди полів лежать у межах України та що{" "}
+        <code className="rounded bg-muted px-1">
+          backend/data/raw/ukraine_oblasts.geojson
+        </code>{" "}
+        доступний.
+      </div>
+    );
+  }
+  if (fieldsWithPrediction === 0) {
+    return (
+      <div className="px-6 py-6 text-sm text-muted-foreground">
+        Жоден прогноз ще не порахований. Натисніть «Перерахувати» на
+        картці прогнозу будь-якого поля, щоб запустити модель.
       </div>
     );
   }
   return (
     <div className="space-y-2 px-6 py-6 text-sm text-muted-foreground">
       <p>
-        Області ваших полів є <strong>поза покриттям</strong> поточного
-        Sentinel-2 датасета.
+        Немає даних Держстат за культуру/область для жодного з ваших
+        полів. Якщо ви додали нішеву культуру або область, опубліковані
+        бюлетені 2018-2021 її не покривають — спробуйте порівняти
+        окремо за наявності власних даних.
       </p>
     </div>
   );

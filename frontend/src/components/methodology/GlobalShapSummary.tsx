@@ -144,7 +144,7 @@ export function GlobalShapSummary() {
           <div className="py-8 text-center text-sm text-muted-foreground">
             Для цієї пари (модель × культура) {mode === "shap" ? "SHAP" : "permutation importance"}{" "}
             не обчислена. Stack-моделі (Ridge поверх OOF preds) не мають
-            однозначної feature-importance — оберіть RF / XGBoost / LightGBM / CatBoost.
+            однозначної feature-importance — оберіть RF / XGBoost / LightGBM.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={420}>

@@ -33,7 +33,6 @@ const FAMILY_LABEL: Record<string, string> = {
   rf: "Random Forest",
   xgboost: "XGBoost",
   lightgbm: "LightGBM",
-  catboost: "CatBoost",
   stack: "Stacked Ensemble",
   lstm: "LSTM",
 };

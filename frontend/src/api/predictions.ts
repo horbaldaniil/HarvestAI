@@ -15,16 +15,16 @@ export interface PredictionRead {
   confidence: number | null;
   /**
    * XGBoost-only 90 % prediction interval (5th–95th percentile via
-   * quantile regression). Stack / RF / LGBM / CatBoost don't store
-   * quantile siblings — `null` in those cases, UI renders the point
+   * quantile regression). Stack / RF / LGBM don't store quantile
+   * siblings — `null` in those cases, UI renders the point
    * estimate alone.
    */
   value_tha_q05: number | null;
   value_tha_q95: number | null;
   /**
    * Family that produced the SHAP contributions. Equals the headline
-   * model family when it's a tree (xgboost / rf / lgbm / catboost);
-   * differs when the resolved model is `stack` and we fell back to a
+   * model family when it's a tree (xgboost / rf / lgbm); differs when
+   * the resolved model is `stack` and we fell back to a
    * sibling tree for interpretability. UI shows a small disclaimer
    * when these don't match.
    */

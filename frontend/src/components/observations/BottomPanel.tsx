@@ -123,9 +123,14 @@ export function BottomPanel({
   };
 
   return (
+    // Lives as a normal flex item inside the FieldsPage stage's
+    // flex-column — the parent allocates remaining height to <FieldMap>
+    // via flex-1, this panel takes its declared height. Previously it
+    // floated as `absolute bottom-0` over the map (z-[900]); switched to
+    // in-flow so the map actually shrinks/grows as the panel toggles.
     <div
       className={cn(
-        "pointer-events-auto absolute bottom-0 left-0 right-0 z-[900] border-t bg-card shadow-2xl transition-all duration-300",
+        "border-t bg-card shadow-2xl transition-all duration-300",
         collapsed ? "h-12" : "h-[340px]",
       )}
     >

@@ -65,8 +65,8 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
   }
 
   // Render the q05/q95 band only when both bounds are present. XGBoost
-  // payloads carry quantile siblings; stack / RF / LGBM / CatBoost
-  // don't, so this row simply disappears for those families.
+  // payloads carry quantile siblings; stack / RF / LGBM don't, so this
+  // row simply disappears for those families.
   const hasRange =
     prediction.value_tha_q05 !== null && prediction.value_tha_q95 !== null;
 
@@ -80,9 +80,18 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
     prediction.explainer_source !== modelFamily;
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3">
-      {/* Big number */}
-      <div className="text-center">
+    // Three-band layout: fixed header (number + range) on top, scrollable
+    // body (LLM summary + SHAP bars) in the middle, fixed footer (progress
+    // bar + Перерахувати button) at the bottom. The middle band is
+    // `flex-1 min-h-0 overflow-y-auto` — `min-h-0` is the magic that lets
+    // a flex item shrink below its content height and scroll internally;
+    // without it Tailwind's default `min-h: auto` would keep the
+    // summary block at its natural height and push the button off the
+    // bottom of the 292 px-tall right column when the LLM produces a
+    // long narrative.
+    <div className="flex h-full flex-col p-3">
+      {/* Big number — fixed */}
+      <div className="shrink-0 text-center">
         <div className="text-3xl font-bold tabular-nums">
           {prediction.value_tha.toFixed(1)}
           {prediction.confidence !== null && (
@@ -106,36 +115,39 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
         )}
       </div>
 
-      {/* LLM narrative — italic, 2-3 sentences explaining the value. */}
-      {prediction.summary_text && (
-        <p className="rounded-md border bg-muted/40 p-2 text-xs italic leading-relaxed text-muted-foreground">
-          {prediction.summary_text}
-        </p>
-      )}
+      {/* Scrollable middle band — summary + SHAP bars share this area. */}
+      <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+        {/* LLM narrative — italic, 2-3 sentences explaining the value. */}
+        {prediction.summary_text && (
+          <p className="shrink-0 rounded-md border bg-muted/40 p-2 text-xs italic leading-relaxed text-muted-foreground">
+            {prediction.summary_text}
+          </p>
+        )}
 
-      {/* SHAP top-5 */}
-      {prediction.shap_top_json.length > 0 && (
-        <div className="flex-1 overflow-y-auto">
-          <div className="mb-1 text-xs font-semibold text-muted-foreground">
-            {t("prediction.factors")}
+        {/* SHAP top-5 */}
+        {prediction.shap_top_json.length > 0 && (
+          <div className="shrink-0">
+            <div className="mb-1 text-xs font-semibold text-muted-foreground">
+              {t("prediction.factors")}
+            </div>
+            <div className="space-y-1">
+              {prediction.shap_top_json.map((bar) => (
+                <ShapBarRow key={bar.name} bar={bar} />
+              ))}
+            </div>
+            {showExplainerDisclaimer && (
+              <p className="mt-2 text-[10px] text-muted-foreground/70">
+                Пояснення на основі моделі {prediction.explainer_source}{" "}
+                (компонент стек-ансамблю)
+              </p>
+            )}
           </div>
-          <div className="space-y-1">
-            {prediction.shap_top_json.map((bar) => (
-              <ShapBarRow key={bar.name} bar={bar} />
-            ))}
-          </div>
-          {showExplainerDisclaimer && (
-            <p className="mt-2 text-[10px] text-muted-foreground/70">
-              Пояснення на основі моделі {prediction.explainer_source}{" "}
-              (компонент стек-ансамблю)
-            </p>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Progress while recomputing */}
+      {/* Progress while recomputing — fixed footer above the button. */}
       {isWorking && (
-        <div>
+        <div className="mt-3 shrink-0">
           <Progress value={progressPct} />
         </div>
       )}
@@ -145,7 +157,7 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
         variant="outline"
         onClick={onRecompute}
         disabled={!!isWorking}
-        className="w-full"
+        className="mt-3 w-full shrink-0"
       >
         {isWorking ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />

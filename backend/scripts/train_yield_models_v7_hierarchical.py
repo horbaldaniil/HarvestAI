@@ -91,7 +91,7 @@ V7_TRAIN_YEARS = (2018, 2019)
 V7_VAL_YEAR = 2020
 V7_TEST_YEAR = 2021
 
-ALL_FAMILIES = ("rf", "xgboost", "lightgbm", "catboost", "stack")
+ALL_FAMILIES = ("rf", "xgboost", "lightgbm", "stack")
 
 
 @dataclass
@@ -145,10 +145,14 @@ def _apply_oblast_mean_offset(
 
 
 def _make_model(family: str):
-    """Same hyper-parameters as v6 trainer."""
+    """Same hyper-parameters as v6 trainer.
+
+    CatBoost was previously a fourth family and stack base learner;
+    removed entirely — the three remaining boosters cover the same
+    model diversity for hierarchical residual prediction.
+    """
     import lightgbm as lgb
     import xgboost as xgb
-    from catboost import CatBoostRegressor
 
     if family == "rf":
         return RandomForestRegressor(n_estimators=300, min_samples_leaf=2,
@@ -161,9 +165,6 @@ def _make_model(family: str):
     if family == "lightgbm":
         return lgb.LGBMRegressor(n_estimators=400, num_leaves=31, learning_rate=0.05,
                                  random_state=42, n_jobs=-1, verbose=-1)
-    if family == "catboost":
-        return CatBoostRegressor(iterations=400, depth=6, learning_rate=0.05,
-                                 random_state=42, verbose=False)
     if family == "stack":
         base = [
             ("rf", RandomForestRegressor(n_estimators=200, min_samples_leaf=2,
@@ -176,8 +177,6 @@ def _make_model(family: str):
             ("lgbm", lgb.LGBMRegressor(n_estimators=300, num_leaves=31,
                                         learning_rate=0.05, random_state=42,
                                         n_jobs=-1, verbose=-1)),
-            ("cat", CatBoostRegressor(iterations=300, depth=6, learning_rate=0.05,
-                                       random_state=42, verbose=False)),
         ]
         return StackingRegressor(
             estimators=base,
@@ -190,7 +189,7 @@ def _make_model(family: str):
 
 def _save_model(family: str, crop: str, payload: dict) -> None:
     short = {"rf": "rf", "xgboost": "xgb", "lightgbm": "lgbm",
-             "catboost": "cat", "stack": "stack"}[family]
+             "stack": "stack"}[family]
     path = MODELS_DIR / f"yield_{short}_{crop}_v7h.joblib"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(payload, path)

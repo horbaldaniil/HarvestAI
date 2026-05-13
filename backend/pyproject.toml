@@ -37,10 +37,11 @@ dependencies = [
     "xgboost>=2.1.2",
     # Week 9 — thesis-grade model expansion: gradient-boosting alternatives
     # and stacked ensembles that participate in the methodology comparison.
-    # LightGBM ~2× faster than XGBoost; CatBoost handles categorical
-    # features (crop_type, oblast) without one-hot expansion.
+    # LightGBM ~2× faster than XGBoost. CatBoost was previously listed
+    # here as a fourth booster + stack base learner, but was removed in
+    # the post-v7 cleanup — too awkward to maintain across Python versions
+    # and the three remaining boosters cover the same model diversity.
     "lightgbm>=4.5.0",
-    "catboost>=1.2.7",
     "pyyaml>=6.0",  # build_yield_csv reads Держстат yield YAML
     "rasterio>=1.4.2",
     "shapely>=2.0.6",

@@ -42,6 +42,7 @@ from app.services.dashboard_analytics import (
     compute_risk_score,
     find_oblast_for_centroid,
     oblast_avg_ndvi,
+    oblast_avg_yield,
     oblast_baseline_year,
     oblast_name_uk,
 )
@@ -250,6 +251,14 @@ async def get_dashboard(
         oblast_baseline = oblast_avg_ndvi(oblast_english, current_year)
         oblast_yr = oblast_baseline_year(oblast_english) if oblast_baseline is not None else None
 
+        # User-facing "Поле vs середнє по області" baseline — predicted
+        # yield vs published Держстат mean for the same (oblast, crop).
+        # NDVI baseline above still feeds compute_risk_score; these are
+        # separate concerns.
+        oblast_yield_avg, oblast_yield_year = oblast_avg_yield(
+            oblast_english, crop_val, current_year,
+        )
+
         risk_score, risk_factors = compute_risk_score(
             current_ndvi=current_ndvi,
             oblast_avg_ndvi=oblast_baseline,
@@ -277,6 +286,8 @@ async def get_dashboard(
             "oblast_name": oblast_name_uk(oblast_english),
             "oblast_avg_ndvi": round(oblast_baseline, 3) if oblast_baseline is not None else None,
             "oblast_baseline_year": oblast_yr,
+            "oblast_avg_yield_tha": oblast_yield_avg,
+            "oblast_avg_yield_year": oblast_yield_year,
             "geometry": _field_polygon_geojson(f),
         }
         field_rows.append(DashboardFieldRow(**row_dict))

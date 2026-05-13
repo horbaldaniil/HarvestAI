@@ -45,14 +45,12 @@ const FAMILY_LABEL: Record<string, string> = {
   rf: "Random Forest",
   xgboost: "XGBoost",
   lightgbm: "LightGBM",
-  catboost: "CatBoost",
   lstm: "LSTM",
   stack: "Stacked Ensemble",
 };
 
 const FAMILY_ORDER: string[] = [
   "stack",
-  "catboost",
   "lightgbm",
   "xgboost",
   "rf",

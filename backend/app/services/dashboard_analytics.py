@@ -254,6 +254,110 @@ def oblast_baseline_year(oblast_name: str | None) -> int | None:
     return entry[0] if entry else None
 
 
+# ─── Per-(oblast, crop) Держстат yield baseline ────────────────
+#
+# Powers the dashboard's "Поле vs середнє по області" comparison. The
+# legacy NDVI-only baseline above (v2 parquet, 8 oblasts) is kept for
+# `compute_risk_score` to consume, but the user-facing comparison now
+# uses ACTUAL Держстат yields out of `training_set_v3.parquet` — 24
+# oblasts × 13 crops × 6 years, filtered to is_real_yield=True so the
+# average reflects published statistics, not synthetic placeholders.
+#
+# Names: the v3 parquet stores "Lviv" / "Odesa" (Ukrainian-style
+# romanisation) while `find_oblast_for_centroid` returns "L'viv" /
+# "Odessa" (Natural Earth). We normalise both through
+# `iso_from_any_name()` so ISO 3166-2 codes are the canonical key.
+
+
+@lru_cache(maxsize=1)
+def _load_oblast_yield_baseline() -> dict[tuple[str, str, int], float]:
+    """(ISO 3166-2 oblast code, crop slug, year) → mean t/ha.
+
+    Built from `training_set_v3.parquet`'s `is_real_yield=True` rows.
+    Each (oblast, crop, year) cell typically has 4–8 sample-polygon
+    rows in v3; we collapse via mean so the comparison is robust to
+    a single weird polygon.
+    """
+    from app.data_reference.oblast_names import iso_from_any_name
+
+    path = Path("data/processed/training_set_v3.parquet")
+    if not path.exists():
+        log.warning(
+            "training_set_v3.parquet missing — oblast yield baseline disabled",
+        )
+        return {}
+    try:
+        import pandas as pd
+
+        df = pd.read_parquet(
+            path,
+            columns=["oblast", "crop", "year", "yield_tha", "is_real_yield"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not load v3 parquet for oblast yield baseline: %s", exc)
+        return {}
+
+    # Honest rows only — synthetic rows have hash-noise yields that
+    # would skew the regional baseline downward.
+    real = df[df["is_real_yield"] == True]  # noqa: E712
+    if real.empty:
+        log.warning("v3 parquet has no is_real_yield=True rows")
+        return {}
+
+    out: dict[tuple[str, str, int], float] = {}
+    grouped = real.groupby(["oblast", "crop", "year"])["yield_tha"].mean()
+    for (oblast_name, crop, year), mean_yield in grouped.items():
+        iso = iso_from_any_name(str(oblast_name))
+        if iso is None:
+            # Unknown spelling — skip rather than pollute the lookup.
+            continue
+        out[(iso, str(crop), int(year))] = round(float(mean_yield), 3)
+    return out
+
+
+def oblast_avg_yield(
+    oblast_name: str | None,
+    crop: str | None,
+    year: int | None,
+) -> tuple[float | None, int | None]:
+    """Resolve (any-spelling oblast name, crop slug, year) → mean t/ha.
+
+    Falls back to the most-recent year available for that (oblast, crop)
+    when the exact `year` isn't in the dataset. Returns (None, None)
+    when there's no real-yield row for the combo at all (e.g. the user
+    has a crop whose oblast hasn't been collected, or a new crop added
+    after v3).
+    """
+    from app.data_reference.oblast_names import iso_from_any_name
+
+    if not oblast_name or not crop:
+        return None, None
+    iso = iso_from_any_name(oblast_name)
+    if iso is None:
+        return None, None
+    baseline = _load_oblast_yield_baseline()
+    if not baseline:
+        return None, None
+    if year is not None and (iso, crop, year) in baseline:
+        return baseline[(iso, crop, year)], year
+    # Most-recent year fallback — find the highest year for this
+    # (oblast, crop) pair. Tiny linear scan over <2 000 entries.
+    candidates = [
+        (yr, val) for (i, c, yr), val in baseline.items()
+        if i == iso and c == crop
+    ]
+    if not candidates:
+        return None, None
+    candidates.sort(reverse=True)  # highest year first
+    yr, val = candidates[0]
+    return val, yr
+
+
+def reset_oblast_yield_baseline_cache() -> None:
+    """Test helper — flush the lru_cache after fixtures rewrite the parquet."""
+    _load_oblast_yield_baseline.cache_clear()
+
+
 def reset_oblast_baseline_cache() -> None:
     """Test helper — call after the parquet is rewritten."""
     _load_oblast_baseline.cache_clear()
@@ -368,10 +472,12 @@ __all__ = [
     "compute_risk_score",
     "find_oblast_for_centroid",
     "oblast_avg_ndvi",
+    "oblast_avg_yield",
     "oblast_baseline_year",
     "oblast_name_uk",
     "phenology_calendar",
     "phenology_phase",
     "reset_oblast_baseline_cache",
     "reset_oblast_polygons_cache",
+    "reset_oblast_yield_baseline_cache",
 ]

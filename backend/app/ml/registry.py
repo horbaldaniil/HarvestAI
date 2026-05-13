@@ -30,28 +30,32 @@ from app.db.models.enums import CropType
 
 log = logging.getLogger(__name__)
 
-AlgorithmFamily = Literal["xgboost", "rf", "lstm", "lightgbm", "catboost", "stack"]
+AlgorithmFamily = Literal["xgboost", "rf", "lstm", "lightgbm", "stack"]
 ALL_FAMILIES: tuple[AlgorithmFamily, ...] = (
-    "xgboost", "rf", "lstm", "lightgbm", "catboost", "stack",
+    "xgboost", "rf", "lstm", "lightgbm", "stack",
 )
 # Filenames use short prefixes for python-package alignment + history:
 #   xgboost → "xgb" (v1/v2/v3 history)
-#   lightgbm → "lgbm"  catboost → "cat"  stack → "stack"
+#   lightgbm → "lgbm"  stack → "stack"
+# CatBoost was previously a fifth family ("cat" prefix); removed entirely
+# — the package was an awkward dependency to maintain across Python
+# versions and the three remaining tree boosters cover the same model
+# diversity. v3-v6 legacy `yield_cat_*.joblib` files (if any survived)
+# are no longer discoverable from here.
 FAMILY_FILE_PREFIX: dict[AlgorithmFamily, str] = {
     "xgboost": "xgb",
     "rf": "rf",
     "lstm": "lstm",
     "lightgbm": "lgbm",
-    "catboost": "cat",
     "stack": "stack",
 }
 
 # Tree-based families that SHAP TreeExplainer supports out of the box.
-# RF / XGB / LGBM / CatBoost all qualify; "stack" is a Ridge over OOF
-# predictions of the four tree models, so SHAP at the stack level isn't
-# meaningful (the meta-input space ≠ the original 17 features).
+# RF / XGB / LGBM all qualify; "stack" is a Ridge over OOF predictions
+# of the three tree models, so SHAP at the stack level isn't
+# meaningful (the meta-input space ≠ the original 30 features).
 TREE_FAMILIES: frozenset[AlgorithmFamily] = frozenset({
-    "xgboost", "rf", "lightgbm", "catboost",
+    "xgboost", "rf", "lightgbm",
 })
 
 # Order in which we pick a default model for a crop if `active_model_family`
@@ -64,12 +68,10 @@ DEFAULT_PREFERENCE: tuple[tuple[AlgorithmFamily, str], ...] = (
     # Both v7 variants beat v6 for different crop subsets; runtime
     # selection happens via best-of-both eval.
     ("stack", "v7"),
-    ("catboost", "v7"),
     ("lightgbm", "v7"),
     ("xgboost", "v7"),
     ("rf", "v7"),
     ("stack", "v7h"),
-    ("catboost", "v7h"),
     ("lightgbm", "v7h"),
     ("xgboost", "v7h"),
     ("rf", "v7h"),
@@ -78,22 +80,18 @@ DEFAULT_PREFERENCE: tuple[tuple[AlgorithmFamily, str], ...] = (
     # No synthetic confound — these are the thesis-defense headline.
     # v5 = mixed real+synthetic trained, kept for ablation history.
     ("stack", "v6"),
-    ("catboost", "v6"),
     ("lightgbm", "v6"),
     ("xgboost", "v6"),
     ("rf", "v6"),
     ("stack", "v5"),
-    ("catboost", "v5"),
     ("lightgbm", "v5"),
     ("xgboost", "v5"),
     ("rf", "v5"),
     ("stack", "v4"),
-    ("catboost", "v4"),
     ("lightgbm", "v4"),
     ("xgboost", "v4"),
     ("rf", "v4"),
     ("stack", "v3"),
-    ("catboost", "v3"),
     ("lightgbm", "v3"),
     ("xgboost", "v3"),
     ("rf", "v3"),
@@ -110,7 +108,6 @@ DISCOVERY_VERSIONS: dict[AlgorithmFamily, tuple[str, ...]] = {
     "xgboost": ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v7h"),
     "rf": ("v1", "v3", "v4", "v5", "v6", "v7", "v7h"),
     "lightgbm": ("v3", "v4", "v5", "v6", "v7", "v7h"),
-    "catboost": ("v3", "v4", "v5", "v6", "v7", "v7h"),
     "stack": ("v3", "v4", "v5", "v6", "v7", "v7h"),
 }
 

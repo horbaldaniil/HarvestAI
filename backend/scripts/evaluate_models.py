@@ -104,7 +104,7 @@ EVAL_OUT = EVAL_OUT_V3
 # Family → joblib filename short-form (matches train_yield_models_v3.py).
 FAMILY_SHORT = {
     "rf": "rf", "xgboost": "xgb", "lightgbm": "lgbm",
-    "catboost": "cat", "stack": "stack",
+    "stack": "stack",
 }
 
 
@@ -409,7 +409,6 @@ def _factory_for_family(family: str) -> Callable[[], Any]:
     use the same model class as the published checkpoint)."""
     import lightgbm as lgb
     import xgboost as xgb
-    from catboost import CatBoostRegressor
     from sklearn.ensemble import RandomForestRegressor
 
     if family == "rf":
@@ -429,12 +428,6 @@ def _factory_for_family(family: str) -> Callable[[], Any]:
             n_estimators=400, num_leaves=31, learning_rate=0.05,
             subsample=0.85, colsample_bytree=0.85,
             random_state=42, n_jobs=-1, verbose=-1,
-        )
-    if family == "catboost":
-        return lambda: CatBoostRegressor(
-            iterations=400, depth=6, learning_rate=0.05,
-            loss_function="RMSE", random_state=42,
-            thread_count=-1, verbose=False,
         )
     if family == "stack":
         # We don't re-train stack inside CV — too slow and the OOF tower
@@ -465,7 +458,7 @@ def _predictor(payload: dict[str, Any]) -> Callable[[np.ndarray], np.ndarray]:
     if "point" in payload:                # xgboost v3 bundle
         m = payload["point"]
         return lambda X: np.asarray(m.predict(X))
-    if "model" in payload:                # rf / lgbm / catboost / stack
+    if "model" in payload:                # rf / lgbm / stack
         m = payload["model"]
         return lambda X: np.asarray(m.predict(X))
     raise ValueError("Unknown payload shape: %s" % list(payload.keys()))
@@ -577,7 +570,7 @@ def main() -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--crop", action="append", default=None,
                         help="restrict to one or more crops (repeatable)")
-    parser.add_argument("--families", default="rf,xgboost,lightgbm,catboost,stack",
+    parser.add_argument("--families", default="rf,xgboost,lightgbm,stack",
                         help="comma list of families to evaluate")
     parser.add_argument("--skip-loocv", action="store_true",
                         help="skip leave-one-oblast-out (faster dev iteration)")

@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 # original 30 features). Every v7 tree model was trained on the same
 # `FEATURE_NAMES` tuple, so the SHAP contributions explain the inputs
 # honestly — they just come from a sibling estimator's perspective.
-_TREE_FALLBACK_ORDER: tuple[str, ...] = ("xgboost", "rf", "lightgbm", "catboost")
+_TREE_FALLBACK_ORDER: tuple[str, ...] = ("xgboost", "rf", "lightgbm")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +50,8 @@ class YieldPrediction:
     model_name: str
     model_version: str
     # Optional quantile band — only populated for XGBoost-triple payloads
-    # (point + q_low + q_high). For stack / rf / lightgbm / catboost this
-    # stays None and the UI renders just the point estimate.
+    # (point + q_low + q_high). For stack / rf / lightgbm this stays
+    # None and the UI renders just the point estimate.
     value_tha_q05: float | None = None
     value_tha_q95: float | None = None
     # Which family generated the SHAP contributions above. Usually equals
@@ -192,7 +192,6 @@ def predict_yield(session: Session, field_id: int, crop: CropType) -> YieldPredi
         "rf": "rf",
         "lstm": "lstm",
         "lightgbm": "lgbm",
-        "catboost": "cat",
         "stack": "stack",
     }.get(resolved_family, resolved_family)
 

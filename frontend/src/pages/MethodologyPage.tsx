@@ -138,10 +138,10 @@ export function MethodologyPage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <p className="text-muted-foreground">
-                  Шість родин моделей на однаковому наборі ознак
+                  П'ять родин моделей на однаковому наборі ознак
                   (17 фіч: 11 вегетаційних + 4 погодних + 2 геопросторових):
-                  Random Forest, XGBoost, LightGBM, CatBoost, LSTM та
-                  Stacked Ensemble (Ridge meta-learner). Per-crop drill-down
+                  Random Forest, XGBoost, LightGBM, LSTM та Stacked
+                  Ensemble (Ridge meta-learner). Per-crop drill-down
                   з sparkline RepeatedKFold(5×3) варіації — компактна
                   ілюстрація bias/variance trade-off між моделями.
                 </p>

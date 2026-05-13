@@ -232,7 +232,7 @@ export function FieldsPage() {
           onDelete={handleDelete}
         />
 
-        <div className="relative flex-1">
+        <div className="relative flex flex-1 flex-col">
           <FieldMap>
             {fields.map((f) => (
               <FieldPolygon
