@@ -64,6 +64,21 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
     );
   }
 
+  // Render the q05/q95 band only when both bounds are present. XGBoost
+  // payloads carry quantile siblings; stack / RF / LGBM / CatBoost
+  // don't, so this row simply disappears for those families.
+  const hasRange =
+    prediction.value_tha_q05 !== null && prediction.value_tha_q95 !== null;
+
+  // Resolve the model family from `model_name` ("yield_<family>_<crop>")
+  // so we can suppress the disclaimer when the explainer matches the
+  // headline model — e.g. for a plain XGBoost prediction, the SHAP
+  // already comes from XGBoost and there's nothing to disclose.
+  const modelFamily = prediction.model_name.split("_")[1] ?? null;
+  const showExplainerDisclaimer =
+    prediction.explainer_source !== null &&
+    prediction.explainer_source !== modelFamily;
+
   return (
     <div className="flex h-full flex-col gap-3 p-3">
       {/* Big number */}
@@ -80,7 +95,23 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
           {t("prediction.unit")} · {t("prediction.modelLabel")}:{" "}
           {prediction.model_version}
         </div>
+        {hasRange && (
+          <div className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
+            ↕ {prediction.value_tha_q05!.toFixed(1)} —{" "}
+            {prediction.value_tha_q95!.toFixed(1)} т/га
+            <span className="ml-1 text-muted-foreground/70">
+              (90% довірчий інтервал)
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* LLM narrative — italic, 2-3 sentences explaining the value. */}
+      {prediction.summary_text && (
+        <p className="rounded-md border bg-muted/40 p-2 text-xs italic leading-relaxed text-muted-foreground">
+          {prediction.summary_text}
+        </p>
+      )}
 
       {/* SHAP top-5 */}
       {prediction.shap_top_json.length > 0 && (
@@ -93,6 +124,12 @@ export function PredictionCard({ fieldId }: PredictionCardProps) {
               <ShapBarRow key={bar.name} bar={bar} />
             ))}
           </div>
+          {showExplainerDisclaimer && (
+            <p className="mt-2 text-[10px] text-muted-foreground/70">
+              Пояснення на основі моделі {prediction.explainer_source}{" "}
+              (компонент стек-ансамблю)
+            </p>
+          )}
         </div>
       )}
 

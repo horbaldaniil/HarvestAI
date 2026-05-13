@@ -4,7 +4,6 @@ import { Loader2, MessageSquare, Trash2 } from "lucide-react";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { FaqTab } from "@/components/chat/FaqTab";
-import { GlossaryTab } from "@/components/chat/GlossaryTab";
 import { TemplatesTab } from "@/components/chat/TemplatesTab";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,17 +23,13 @@ export function ChatPage() {
           </p>
         </header>
 
-        <Tabs defaultValue="glossary">
+        <Tabs defaultValue="faq">
           <TabsList>
-            <TabsTrigger value="glossary">Глосарій</TabsTrigger>
             <TabsTrigger value="faq">FAQ</TabsTrigger>
             <TabsTrigger value="templates">Шаблони</TabsTrigger>
             <TabsTrigger value="history">Розмови</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="glossary">
-            <GlossaryTab />
-          </TabsContent>
           <TabsContent value="faq">
             <FaqTab />
           </TabsContent>
