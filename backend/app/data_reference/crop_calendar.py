@@ -18,18 +18,37 @@ For each crop:
   - `flowering_window_days`: days centred on peak when heat stress hurts
     most (typical 10-day grain-filling window for cereals)
 
-Sources (cited in docstring per group):
-  - Cereals (wheat, barley, rye, oats, buckwheat):
-    Інститут рослинництва ім. В.Я. Юр'єва (NAAS) "Технологія вирощування
-    зернових культур" 2020 edition
-  - Oilseeds (sunflower, soybean, rapeseed):
-    Demydov O.A. et al. (2019), Mazur V.A. (2017)
-  - Root crops (sugar_beet, potato, corn_silage):
-    Roik M.V. (2014) for sugar beet, Bondarchuk A.A. (2016) for potato
-  - Legume (peas):
-    USDA FAS Ukraine pulses report (2022)
-  - Corn (grain), corn_silage:
-    FAO Crop Calendar for Ukraine
+Sources (per crop):
+  - wheat (winter):    NAAS "Технологія вирощування зернових культур" 2020;
+                       GDD base 5°C per Hatfield & Prueger (2015)
+  - barley (spring):   NAAS 2020; GDD base 4.5°C standard for Hordeum vulgare.
+                       NOTE: winter barley (~20 % of UA area) is treated under
+                       the same `barley` slug — future work could split into
+                       `barley_winter` with its own calendar.
+  - rye (winter):      NAAS 2020; rye is the most cold-tolerant cereal, hence
+                       GDD base 4°C (lowest in the cereal group).
+  - oats (spring):     NAAS 2020.
+  - buckwheat:         NAAS 2020; GDD base 8°C reflects buckwheat's heat-loving
+                       behaviour (one of the highest among small-grain crops).
+  - corn (grain):      FAO Crop Calendar for Ukraine + FAO ECOCROP; GDD base
+                       10°C is the canonical C4 reference.
+  - corn_silage:       FAO Crop Calendar; same physiology as grain corn but
+                       harvested at milk-dough stage (August).
+  - sunflower:         FAO ECOCROP (Helianthus annuus) GDD base 7.2°C;
+                       Demydov et al. 2019 cite 7-8°C range. Previous 6.0°C
+                       was at the low end of the literature.
+  - soybean:           FAO ECOCROP GDD base 10°C. Peak_month=8 (R5 full-canopy
+                       NDVI peak) rather than 7 (flowering R3) for more
+                       accurate NDVI feature alignment.
+  - rapeseed (winter): Mazur V.A. 2017; sowing window in Ukraine is late
+                       August to first week of September — we store 9 (Sept)
+                       as the integer-month approximation.
+  - peas:              USDA FAS Ukraine pulses report 2022.
+  - sugar_beet:        Roik M.V. 2014; peak_month=8 reflects mid-August root-
+                       and-canopy biomass peak (NDVI signal).
+  - potato:            Bondarchuk A.A. 2016 + FAO ECOCROP; GDD base 5.5°C
+                       is the canonical value for Solanum tuberosum (was
+                       7.0°C, which was at the upper end of the literature).
 """
 from __future__ import annotations
 
@@ -59,6 +78,77 @@ class CropCalendar:
     def growing_season_length_months(self) -> int:
         return len(self.growing_season_months)
 
+    # ─── BBCH-aligned phase splits (Phase-A round-3) ─────────────
+    #
+    # Instead of one generic Apr-Jul aggregate per crop, give the model
+    # weather signals separated by phenological phase. Each phase has its
+    # own dominant agronomic stress mode:
+    #
+    #   - early_veg: vegetative growth (BBCH 10-39). Water demand
+    #     moderate; cool-season crops prefer adequate spring rain.
+    #   - flowering: reproductive phase (BBCH 51-69). HEAT-SENSITIVE —
+    #     a single 35°C day at flowering can sterilise wheat anthers.
+    #     Drought also amplified here (no recovery possible later).
+    #   - grain_fill: yield accumulation (BBCH 71-89). Water-driven;
+    #     soil-moisture depletion limits grain weight.
+    #
+    # Boundaries derived mechanically from `sow_month` / `peak_month` /
+    # `harvest_month` — `peak_month` is the agronomic flowering anchor
+    # used everywhere else in the codebase (e.g. `_crop_features`).
+
+    @property
+    def early_veg_months(self) -> tuple[int, ...]:
+        """Sowing → month before peak (vegetative growth phase).
+
+        Handles wraparound for winter crops (sow=10, peak=5 → returns
+        (10, 11, 12, 1, 2, 3, 4)). Excludes the peak month itself — that
+        belongs to `flowering_months`.
+        """
+        gs = list(self.growing_season_months)
+        try:
+            peak_idx = gs.index(self.peak_month)
+        except ValueError:
+            # Peak not in growing season? Shouldn't happen, but fall back
+            # to "everything before harvest" as a defensive default.
+            return tuple(gs[:-1])
+        return tuple(gs[:peak_idx])
+
+    @property
+    def flowering_months(self) -> tuple[int, ...]:
+        """Peak month ± ceil(flowering_window_days / 30).
+
+        With the default `flowering_window_days=10`, returns just the
+        peak month itself (one-month window). For crops with longer
+        flowering periods (sunflower 30+ days) the window expands. Wrap-
+        around-aware: handles peak=5 + window_days=20 → (4, 5, 6) ok,
+        or peak=12 + window_days=45 → (11, 12, 1).
+        """
+        import math
+        half = max(1, math.ceil(self.flowering_window_days / 30))
+        months: list[int] = [self.peak_month]
+        for offset in range(1, half + 1):
+            before = ((self.peak_month - offset - 1) % 12) + 1
+            after = ((self.peak_month + offset - 1) % 12) + 1
+            if before not in months:
+                months.insert(0, before)
+            if after not in months:
+                months.append(after)
+        # Restrict to months actually inside the growing season — the
+        # ±window can spill into dormancy for winter crops with short
+        # flowering windows; we don't want Feb on a wheat-flowering list.
+        gs = set(self.growing_season_months)
+        return tuple(m for m in months if m in gs)
+
+    @property
+    def grain_fill_months(self) -> tuple[int, ...]:
+        """Month after peak → harvest month (grain-fill / maturation)."""
+        gs = list(self.growing_season_months)
+        try:
+            peak_idx = gs.index(self.peak_month)
+        except ValueError:
+            return ()
+        return tuple(gs[peak_idx + 1:])
+
 
 CROP_CALENDAR: Final[dict[str, CropCalendar]] = {
     # ─── Cereals ────────────────────────────────────────────
@@ -78,10 +168,14 @@ CROP_CALENDAR: Final[dict[str, CropCalendar]] = {
     "corn": CropCalendar(sow_month=4, peak_month=7, harvest_month=9, gdd_base_c=10.0),
     # Corn for silage — harvested earlier (whole-plant), slightly shorter.
     "corn_silage": CropCalendar(sow_month=4, peak_month=7, harvest_month=8, gdd_base_c=10.0),
-    # Sunflower — drought-tolerant, late maturation.
-    "sunflower": CropCalendar(sow_month=5, peak_month=7, harvest_month=9, gdd_base_c=6.0),
-    # Soybean — heat-demanding, May-September window.
-    "soybean": CropCalendar(sow_month=5, peak_month=7, harvest_month=9, gdd_base_c=10.0),
+    # Sunflower — drought-tolerant, late maturation. GDD base updated
+    # 6.0 → 7.2 per FAO ECOCROP (Demydov 2019 cites 7-8°C range).
+    "sunflower": CropCalendar(sow_month=5, peak_month=7, harvest_month=9, gdd_base_c=7.2),
+    # Soybean — heat-demanding, May-September window. peak_month shifted
+    # 7 → 8: NDVI canopy peak is the R5 full-canopy stage (August), not
+    # R3 flowering (July) — this lets `ndvi_at_crop_peak_month` pull
+    # the right monthly slot for soybean fields.
+    "soybean": CropCalendar(sow_month=5, peak_month=8, harvest_month=9, gdd_base_c=10.0),
     # Winter rapeseed dominates Ukrainian production.
     "rapeseed": CropCalendar(sow_month=9, peak_month=5, harvest_month=7, gdd_base_c=5.0),
     # ─── Legume ────────────────────────────────────────────
@@ -90,8 +184,11 @@ CROP_CALENDAR: Final[dict[str, CropCalendar]] = {
     # ─── Root crops ────────────────────────────────────────
     # Sugar beet — very long season.
     "sugar_beet": CropCalendar(sow_month=4, peak_month=8, harvest_month=10, gdd_base_c=5.0),
-    # Potato — shorter than sugar beet, more flexible.
-    "potato": CropCalendar(sow_month=4, peak_month=7, harvest_month=9, gdd_base_c=7.0),
+    # Potato — shorter than sugar beet, more flexible. GDD base updated
+    # 7.0 → 5.5 per FAO ECOCROP (Solanum tuberosum); previous value
+    # overestimated GDD accumulation in cool springs and skewed the
+    # gdd_proxy feature downward for northern oblasts.
+    "potato": CropCalendar(sow_month=4, peak_month=7, harvest_month=9, gdd_base_c=5.5),
 }
 
 

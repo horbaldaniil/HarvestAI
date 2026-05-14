@@ -17,6 +17,7 @@ its metrics; runtime inference still goes through the tabular path.
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from pathlib import Path
@@ -29,6 +30,54 @@ from app.config import settings
 from app.db.models.enums import CropType
 
 log = logging.getLogger(__name__)
+
+
+# Path to the hybrid-evaluator output. Read lazily (lru_cached) and
+# consulted by `_resolve_default` per crop. When present, its
+# `(selected_family, selected_version)` overrides the generic
+# `DEFAULT_PREFERENCE` walk — so wheat picks `rf/v7` (test R²=0.638)
+# instead of the default-first `stack/v7` (R²=0.360). Single source
+# of truth between methodology display and runtime inference.
+HYBRID_EVAL_PATH = Path("data/processed/evaluation_v7_hybrid.json")
+
+
+@functools.lru_cache(maxsize=1)
+def _load_hybrid_eval_preferences() -> dict[str, tuple[str, str]]:
+    """Read `evaluation_v7_hybrid.json` → `{crop_slug: (family, version)}`.
+
+    For each crop the file has `selected_family` + `selected_version`
+    fields chosen by `scripts/evaluate_v7_hybrid.py` as the best test-R²
+    candidate across {v6, v7, v7h}. We surface that mapping so the
+    inference path uses the same model the methodology calls "best",
+    eliminating the misalignment where `DEFAULT_PREFERENCE` would put
+    `stack/v7` first regardless of per-crop fitness.
+
+    Returns an empty dict if the JSON is missing, malformed, or all
+    crops are flagged `skipped` — callers fall back to the legacy
+    `DEFAULT_PREFERENCE` walk in that case (backward compatible).
+    """
+    if not HYBRID_EVAL_PATH.exists():
+        return {}
+    try:
+        blob = json.loads(HYBRID_EVAL_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not parse %s: %s", HYBRID_EVAL_PATH, exc)
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for crop, body in (blob.get("crops") or {}).items():
+        if not isinstance(body, dict) or body.get("skipped"):
+            continue
+        fam = body.get("selected_family")
+        ver = body.get("selected_version")
+        if fam and ver:
+            out[crop] = (str(fam), str(ver))
+    return out
+
+
+def reset_hybrid_eval_preferences_cache() -> None:
+    """Test helper — drops the lru_cache so tests can swap the JSON
+    between cases. Mirror of the same-name helper in `yield_model.py`."""
+    _load_hybrid_eval_preferences.cache_clear()
 
 AlgorithmFamily = Literal["xgboost", "rf", "lstm", "lightgbm", "stack"]
 ALL_FAMILIES: tuple[AlgorithmFamily, ...] = (
@@ -104,12 +153,31 @@ DEFAULT_PREFERENCE: tuple[tuple[AlgorithmFamily, str], ...] = (
 # Listed explicitly so a missing v6 file just leaves the registry on v5,
 # rather than walking the directory and risking accidental loads of
 # half-trained artifacts a developer left behind.
+#
+# **v8 (Phase-B multi-task)** stores ONE model per family covering all
+# 13 crops — filename `yield_{prefix}_v8.joblib` with no crop slot.
+# `_try_load_joblib` branches on `version == "v8"` to look for the
+# single artifact, then registers the same payload under every crop's
+# (crop, family, "v8") key so per-crop resolution still works.
+#
+# **v8h (Phase-C multi-task hierarchical)** follows the same one-file-
+# per-family pattern as v8, but the payload also carries an
+# `oblast_means: {crop: {iso: mean}}` dict and `kind="multi_task_
+# hierarchical"`. Predict-time adds the per-(crop, iso) mean back to
+# the model's deviation output — `yield_model.predict_yield` handles
+# both `v7h` (per-crop) and `v8h` (global, payload-stored) means.
 DISCOVERY_VERSIONS: dict[AlgorithmFamily, tuple[str, ...]] = {
-    "xgboost": ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v7h"),
-    "rf": ("v1", "v3", "v4", "v5", "v6", "v7", "v7h"),
-    "lightgbm": ("v3", "v4", "v5", "v6", "v7", "v7h"),
-    "stack": ("v3", "v4", "v5", "v6", "v7", "v7h"),
+    "xgboost": ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v7h", "v7p", "v8", "v8h"),
+    "rf": ("v1", "v3", "v4", "v5", "v6", "v7", "v7h", "v7p", "v8", "v8h"),
+    "lightgbm": ("v3", "v4", "v5", "v6", "v7", "v7h", "v7p", "v8", "v8h"),
+    "stack": ("v3", "v4", "v5", "v6", "v7", "v7h", "v7p", "v8", "v8h"),
 }
+
+# Phase-C: versions stored as a single global .joblib (no crop slot in
+# filename). Centralised so `_try_load_joblib` and any future cross-
+# checks reference the same set. Adding `v9` (or whatever) here would
+# auto-extend the no-crop discovery branch.
+NO_CROP_SLOT_VERSIONS: frozenset[str] = frozenset({"v8", "v8h"})
 
 
 class ModelRegistry:
@@ -171,7 +239,18 @@ class ModelRegistry:
         self, crop: CropType, family: AlgorithmFamily, version: str, models_dir: Path,
     ) -> None:
         prefix = FAMILY_FILE_PREFIX[family]
-        path = models_dir / f"yield_{prefix}_{crop.value}_{version}.joblib"
+        # Phase-B / Phase-C: v8 and v8h multi-task models live as ONE
+        # .joblib per family (covering all 13 crops). Filename has no
+        # crop slot. The `load_all` loop visits this method once per
+        # CropType, so each such .joblib gets re-loaded from disk 13
+        # times — but joblib files are MB-sized and load in ~50 ms
+        # each, so the ~650 ms total startup overhead is acceptable
+        # and avoids a stateful cache layer with its own correctness
+        # footprint.
+        if version in NO_CROP_SLOT_VERSIONS:
+            path = models_dir / f"yield_{prefix}_{version}.joblib"
+        else:
+            path = models_dir / f"yield_{prefix}_{crop.value}_{version}.joblib"
         if not path.exists():
             return
         try:
@@ -236,6 +315,24 @@ class ModelRegistry:
     # ─── Lookup helpers ──────────────────────────────────────────
 
     def _resolve_default(self, crop: CropType) -> tuple[AlgorithmFamily, str] | None:
+        """Pick the (family, version) for `crop` at inference time.
+
+        Resolution order:
+          1. **`settings.active_model_family` override** — when set, forces
+             this family regardless of per-crop tuning. Used by tests +
+             A/B comparisons.
+          2. **Hybrid-evaluator per-crop best** from
+             `evaluation_v7_hybrid.json`. Each crop's `selected_family` +
+             `selected_version` come from `scripts/evaluate_v7_hybrid.py`'s
+             best-of-{v6, v7, v7h} test-R² pick. This keeps the inference
+             model aligned with what the methodology page calls "best" —
+             previously the registry's static `DEFAULT_PREFERENCE` (stack-
+             first) routinely picked weaker models for individual crops
+             (wheat stack/v7 R²=0.36 vs rf/v7 R²=0.64).
+          3. **`DEFAULT_PREFERENCE` fallback walk** — used when the eval
+             JSON is missing (fresh clone before retrain), the crop wasn't
+             scored, or the eval-picked pair isn't actually on disk.
+        """
         configured = getattr(settings, "active_model_family", None)
         if configured:
             versions = sorted(
@@ -243,6 +340,17 @@ class ModelRegistry:
             )
             if versions:
                 return configured, versions[-1]
+        # Per-crop hybrid-evaluator selection. The cast is safe because
+        # the JSON only ever stores values from `AlgorithmFamily` literals
+        # — `_load_hybrid_eval_preferences` doesn't filter the family
+        # string, so a typo in evaluator output would surface here as a
+        # cache-miss in `self._models` and we'd cleanly fall through to
+        # the legacy preference walk below.
+        hybrid_pref = _load_hybrid_eval_preferences().get(crop.value)
+        if hybrid_pref is not None:
+            fam, ver = hybrid_pref
+            if (crop, fam, ver) in self._models:
+                return fam, ver  # type: ignore[return-value]
         for family, version in DEFAULT_PREFERENCE:
             if (crop, family, version) in self._models:
                 return family, version

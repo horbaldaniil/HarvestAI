@@ -42,6 +42,7 @@ narrow-variance crops (oats, rye, buckwheat, sugar_beet) where it beats v6.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import logging
 import sys
@@ -64,6 +65,11 @@ if str(ROOT) not in sys.path:
 
 from app.data_reference.crop_zones import ALL_CROPS  # noqa: E402
 
+# Optuna sweep output (shared with v7 trainer). Hierarchical models
+# benefit from the same hyperparams as standalone ones because the
+# residual-prediction problem has similar dimensionality.
+OPTUNA_BEST_PATH = ROOT / "data" / "processed" / "optuna_best_params_v7.json"
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("train_yield_v7h")
 
@@ -79,12 +85,55 @@ FEATURE_NAMES: tuple[str, ...] = (
     "precip_sum_apr_jul", "temp_mean_apr_jul",
     "heat_stress_days", "drought_dryspells",
     "centroid_lat", "centroid_lon",
+    # 5 agroclimatic zone one-hot features (regional-baseline lift)
+    "zone_polissia",
+    "zone_forest_steppe",
+    "zone_steppe_north",
+    "zone_steppe_south",
+    "zone_transcarpathia",
+    # Lagged regional yield baselines — same 4-feature set as v7
+    # (mirror of `OBLAST_LAG_FEATURES` in `app/ml/features.py`). For
+    # v7h these complement the hierarchical subtract-oblast-mean
+    # reformulation: the model sees BOTH an explicit lag-N numeric
+    # AND a structural oblast offset, so it can learn within-oblast
+    # year-to-year drift on top of the cross-oblast level shift.
+    "oblast_yield_lag1",
+    "oblast_yield_lag2",
+    "oblast_yield_lag3",
+    "oblast_yield_lag_mean3",
+    # Phase-D Option B (May 2026) tried adding
+    # `neighbor_yield_lag1_mean` here — reverted; see v7 trainer
+    # comment for rationale.
+    # Phase-A round-3 (Oct 2025) — same 16 features as the v7 trainer.
+    # Mirror order so SHAP-importance comparisons across v7/v7h have
+    # identical column positions.
+    "ndvi_mean_october",
+    "ndvi_mean_november",
+    "ndvi_mean_march",
+    "spring_regrowth_ndvi_delta",
+    "sm_jun_jul_mean",
+    "sm_drydown_days",
+    "winter_kill_days",
+    "precip_early_veg",
+    "precip_flowering",
+    "precip_grain_fill",
+    "temp_mean_flowering",
+    "temp_mean_grain_fill",
+    "heat_days_flowering",
+    "heat_days_grain_fill",
+    "drought_days_flowering",
+    "drought_days_grain_fill",
     "crop_season_overlap_aprjul",
     "gdd_proxy",
     "precip_crop_weighted",
     "heat_stress_crop_weighted",
     "drought_crop_weighted",
     "growing_season_length_months",
+    # Phenology-audit additions — same 2 NDVI-aligned features that
+    # the v7 (non-hierarchical) trainer adopts. See `app/ml/features.py`
+    # for the derivation logic.
+    "ndvi_at_crop_peak_month",
+    "ndvi_peak_timing_offset_weeks",
 )
 
 V7_TRAIN_YEARS = (2018, 2019)
@@ -92,6 +141,32 @@ V7_VAL_YEAR = 2020
 V7_TEST_YEAR = 2021
 
 ALL_FAMILIES = ("rf", "xgboost", "lightgbm", "stack")
+
+
+@functools.lru_cache(maxsize=1)
+def _load_optuna_best() -> dict[str, dict[str, dict[str, Any]]]:
+    """Mirror of `scripts/train_yield_models_v7._load_optuna_best`.
+
+    Reuses the same JSON file — hierarchical models benefit from the
+    same per-(crop, family) hyperparameter choices since the residual-
+    prediction problem has similar feature-input dimensionality.
+    Returns empty dict if the sweep hasn't run yet.
+    """
+    if not OPTUNA_BEST_PATH.exists():
+        return {}
+    try:
+        blob = json.loads(OPTUNA_BEST_PATH.read_text(encoding="utf-8"))
+        return blob.get("by_crop", {})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not load Optuna best params: %s", exc)
+        return {}
+
+
+def _optuna_overrides(crop: str, family: str) -> dict[str, Any]:
+    """Per-(crop, family) hyperparam overrides sans `cv_r2`. Empty
+    dict means the hand-tuned constants below remain in effect."""
+    blob = _load_optuna_best().get(crop, {}).get(family, {})
+    return {k: v for k, v in blob.items() if k != "cv_r2"}
 
 
 @dataclass
@@ -144,8 +219,14 @@ def _apply_oblast_mean_offset(
     return df["yield_tha"].values + means
 
 
-def _make_model(family: str):
-    """Same hyper-parameters as v6 trainer.
+def _make_model(family: str, crop: str | None = None):
+    """Build a hierarchical-deviation regressor for one (crop, family).
+
+    Hyperparameter defaults below match the v6 trainer; when Optuna
+    has best-params for (crop, family) those override the defaults.
+    `crop=None` keeps the legacy CLI behaviour where the trainer is
+    called without crop context (e.g. unit-test entry points) — in
+    that case no Optuna lookup happens.
 
     CatBoost was previously a fourth family and stack base learner;
     removed entirely — the three remaining boosters cover the same
@@ -154,33 +235,61 @@ def _make_model(family: str):
     import lightgbm as lgb
     import xgboost as xgb
 
+    overrides = _optuna_overrides(crop, family) if crop else {}
+
     if family == "rf":
-        return RandomForestRegressor(n_estimators=300, min_samples_leaf=2,
-                                     n_jobs=-1, random_state=42)
+        params = dict(n_estimators=300, min_samples_leaf=2)
+        params.update(overrides)
+        return RandomForestRegressor(n_jobs=-1, random_state=42, **params)
+
     if family == "xgboost":
-        return xgb.XGBRegressor(n_estimators=400, max_depth=5, learning_rate=0.05,
-                                subsample=0.85, colsample_bytree=0.85,
-                                random_state=42, n_jobs=-1, tree_method="hist",
-                                objective="reg:squarederror", verbosity=0)
+        params = dict(
+            n_estimators=400, max_depth=5, learning_rate=0.05,
+            subsample=0.85, colsample_bytree=0.85,
+        )
+        params.update(overrides)
+        return xgb.XGBRegressor(
+            random_state=42, n_jobs=-1, tree_method="hist",
+            objective="reg:squarederror", verbosity=0, **params,
+        )
+
     if family == "lightgbm":
-        return lgb.LGBMRegressor(n_estimators=400, num_leaves=31, learning_rate=0.05,
-                                 random_state=42, n_jobs=-1, verbose=-1)
+        params = dict(n_estimators=400, num_leaves=31, learning_rate=0.05)
+        params.update(overrides)
+        return lgb.LGBMRegressor(
+            random_state=42, n_jobs=-1, verbose=-1, **params,
+        )
+
     if family == "stack":
+        rf_params = dict(n_estimators=200, min_samples_leaf=2)
+        xgb_params = dict(
+            n_estimators=300, max_depth=5, learning_rate=0.05,
+            subsample=0.85, colsample_bytree=0.85,
+        )
+        lgbm_params = dict(n_estimators=300, num_leaves=31, learning_rate=0.05)
+        ridge_alpha = 1.0
+        if crop:
+            rf_params.update(_optuna_overrides(crop, "rf"))
+            xgb_params.update(_optuna_overrides(crop, "xgboost"))
+            lgbm_params.update(_optuna_overrides(crop, "lightgbm"))
+            stack_overrides = _optuna_overrides(crop, "stack")
+            if "ridge_alpha" in stack_overrides:
+                ridge_alpha = float(stack_overrides["ridge_alpha"])
         base = [
-            ("rf", RandomForestRegressor(n_estimators=200, min_samples_leaf=2,
-                                         n_jobs=-1, random_state=42)),
-            ("xgb", xgb.XGBRegressor(n_estimators=300, max_depth=5,
-                                     learning_rate=0.05, subsample=0.85,
-                                     colsample_bytree=0.85, random_state=42,
-                                     n_jobs=-1, tree_method="hist",
-                                     objective="reg:squarederror", verbosity=0)),
-            ("lgbm", lgb.LGBMRegressor(n_estimators=300, num_leaves=31,
-                                        learning_rate=0.05, random_state=42,
-                                        n_jobs=-1, verbose=-1)),
+            ("rf", RandomForestRegressor(
+                n_jobs=-1, random_state=42, **rf_params,
+            )),
+            ("xgb", xgb.XGBRegressor(
+                random_state=42, n_jobs=-1, tree_method="hist",
+                objective="reg:squarederror", verbosity=0, **xgb_params,
+            )),
+            ("lgbm", lgb.LGBMRegressor(
+                random_state=42, n_jobs=-1, verbose=-1, **lgbm_params,
+            )),
         ]
         return StackingRegressor(
             estimators=base,
-            final_estimator=Ridge(alpha=1.0),
+            final_estimator=Ridge(alpha=ridge_alpha),
             cv=KFold(n_splits=5, shuffle=True, random_state=42),
             n_jobs=1,
         )
@@ -231,7 +340,7 @@ def train_crop(crop: str, df_real: pd.DataFrame,
     }
     for fam in families:
         try:
-            model = _make_model(fam)
+            model = _make_model(fam, crop=crop)
             if fam == "stack":
                 model.fit(X_trainval, y_trainval_dev)
             else:

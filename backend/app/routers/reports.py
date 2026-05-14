@@ -38,7 +38,6 @@ from app.reports.builder import (
     ALL_FIELD_SECTIONS,
     build_compare_report,
     build_field_report,
-    build_methodology_report,
     build_portfolio_report,
 )
 
@@ -221,35 +220,6 @@ async def portfolio_report(
 
     stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M")
     return _stream_pdf(pdf_bytes, f"HarvestAI_portfolio_{stamp}.pdf")
-
-
-# ─── Methodology report (portfolio-wide ML diagnostic) ────────
-
-
-@router.get("/reports/methodology")
-async def methodology_report(
-    current_user: CurrentUser,
-    db: DbSession,
-    crop: str = "wheat",
-    family: str = "stack",
-) -> StreamingResponse:
-    """Render the Phase-4 scientific metric panel as a PDF.
-
-    Picks one (crop, family) for the headline metrics + residual map +
-    SHAP; the leaderboard + learning curves chart spans all entries.
-    Does NOT persist to `generated_reports` because it's portfolio-wide
-    diagnostic (no per-user state to track).
-    """
-    pdf_bytes = await build_methodology_report(
-        db=db, user=current_user, crop=crop, family=family,
-    )
-    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M")
-    safe_crop = _safe_filename(crop)
-    safe_family = _safe_filename(family)
-    return _stream_pdf(
-        pdf_bytes,
-        f"HarvestAI_methodology_{safe_crop}_{safe_family}_{stamp}.pdf",
-    )
 
 
 # ─── Builder (customisable) ───────────────────────────────────

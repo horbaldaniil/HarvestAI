@@ -113,12 +113,23 @@ def _build_messages(
     crop: str,
     value_tha: float,
     oblast_baseline: float | None,
+    oblast_yield_tha: float | None,
     q_low: float | None,
     q_high: float | None,
     top_shap: list[dict],
 ) -> list[dict[str, str]]:
     """Two-message prompt mirroring `ai_crop_prices.py` — system locks
-    down the shape + tone, user supplies the per-prediction inputs."""
+    down the shape + tone, user supplies the per-prediction inputs.
+
+    Two oblast baselines are passed in: `oblast_baseline` is the NDVI
+    proxy (kept for compatibility, low-signal), `oblast_yield_tha` is
+    the Держстат-published mean yield for the same (oblast, crop)
+    (high-signal, agronomically meaningful). The latter drives a
+    targeted "gap" directive in the system prompt when the prediction
+    diverges by > 20 % from regional reality — surfacing the same
+    paradox the UI's OblastComparisonTable surfaces, so the user reads
+    one coherent narrative instead of two cards in tension.
+    """
     crop_label = _CROP_LABELS_UK.get(crop, crop)
 
     context_lines = [f"Культура: {crop_label}", f"Прогноз: {value_tha:.2f} т/га"]
@@ -128,6 +139,30 @@ def _build_messages(
             f"Середнє по області (NDVI-проксі): {oblast_baseline:.2f} — "
             f"різниця {delta_pct:+.1f}%"
         )
+    yield_gap_directive = ""
+    if oblast_yield_tha is not None and oblast_yield_tha > 0:
+        yield_gap_pct = (value_tha - oblast_yield_tha) / oblast_yield_tha * 100
+        context_lines.append(
+            f"Середня врожайність по області (Держстат): "
+            f"{oblast_yield_tha:.2f} т/га — прогноз {yield_gap_pct:+.1f}% "
+            f"відносно цього базелайну."
+        )
+        # Trigger the gap-address directive only when the divergence is
+        # large enough to mislead the user (UI shows a red badge in this
+        # range). Below 20 % the OblastComparisonTable will likely grey
+        # the row out, and the LLM stays on its default narrative.
+        if abs(yield_gap_pct) > 20:
+            direction = "нижче" if yield_gap_pct < 0 else "вище"
+            yield_gap_directive = (
+                f" Прогноз на {abs(yield_gap_pct):.0f}% {direction} за "
+                f"обласне середнє ({oblast_yield_tha:.1f} т/га). У 1 "
+                "реченні поясни цей розрив чесно — спирайся на SHAP-"
+                "фактори, якщо вони підтримують напрям. Якщо причин з "
+                "SHAP не видно, прямо скажи, що модель не повністю "
+                "враховує регіональну специфіку поля (ґрунт, історія "
+                "сівозміни, агротехніка). Не обіцяй причинно-наслідкових "
+                "зв'язків, яких не підтверджують дані."
+            )
     if q_low is not None and q_high is not None:
         context_lines.append(
             f"90% довірчий інтервал: {q_low:.2f}–{q_high:.2f} т/га"
@@ -146,6 +181,7 @@ def _build_messages(
         "невизначеності. Тон: спокійний, по суті, без зайвих "
         "лозунгів. Відповідай ТІЛЬКИ JSON-об'єктом виду "
         "{\"summary\": \"...\"} БЕЗ зайвих ключів."
+        + yield_gap_directive
     )
     user = "Контекст прогнозу:\n" + "\n".join(context_lines)
     return [
@@ -159,6 +195,7 @@ async def generate_explanation_via_llm(
     crop: str,
     value_tha: float,
     oblast_baseline: float | None = None,
+    oblast_yield_tha: float | None = None,
     q_low: float | None = None,
     q_high: float | None = None,
     top_shap: list[dict] | None = None,
@@ -168,12 +205,19 @@ async def generate_explanation_via_llm(
     Returns `None` on any failure (no API key, OpenAI error, malformed
     JSON, empty / too-long summary). The prediction still persists
     without it — the UI hides the summary block when this is None.
+
+    When `oblast_yield_tha` is provided AND the prediction diverges from
+    it by more than 20 %, the prompt explicitly directs the LLM to
+    address the gap in the narrative so the user reads one coherent
+    explanation instead of having to reconcile PredictionCard (model
+    says good) with OblastComparisonTable (gap is large).
     """
     top_shap = top_shap or []
     messages = _build_messages(
         crop=crop,
         value_tha=value_tha,
         oblast_baseline=oblast_baseline,
+        oblast_yield_tha=oblast_yield_tha,
         q_low=q_low,
         q_high=q_high,
         top_shap=top_shap,

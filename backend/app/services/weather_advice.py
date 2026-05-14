@@ -22,7 +22,7 @@ Severity = Literal["info", "warning", "critical"]
 # `app/data_reference/crop_calendar.py` peak_month). Used by
 # `_heat_rule`; crops not in the dict get the generic warning.
 _HEAT_NOTES: dict[str, str] = {
-    "wheat":       " Для пшениці у фазі цвітіння/наливу зерна (червень) — критично.",
+    "wheat":       " Для пшениці у фазі колосіння/цвітіння (травень-червень) — критично.",
     "corn":        " Кукурудза витримує краще, але цвітіння (липень) чутливе.",
     "sunflower":   " Соняшник у фазі цвітіння (липень) чутливий до спеки й посухи.",
     "soybean":     " Соя у фазі цвітіння (липень) — стрес знижує зав'язування бобів.",

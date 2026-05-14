@@ -164,9 +164,13 @@ async def main() -> int:
         for r in feat_df.itertuples()
     ]
     log.info("Fetching weather for %d (lat, lon, year) keys...", len(weather_input))
-    weather_map = await fetch_weather_for_rows(weather_input)
+    weather_map, daily_map = await fetch_weather_for_rows(weather_input)
 
     def _weather_for_row(r: pd.Series) -> dict[str, float | int]:
+        # WeatherStats default `(0.0, 0.0, 0, 0)` works because the 3
+        # Phase-A round-3 fields all default to 0/0.0 per the dataclass
+        # spec; if Open-Meteo fetch failed for this (lat, lon, year)
+        # the row gets zeros across the board.
         ws: WeatherStats = weather_map.get(
             (float(r["centroid_lat"]), float(r["centroid_lon"]), int(r["year"])),
             WeatherStats(0.0, 0.0, 0, 0),
@@ -176,6 +180,10 @@ async def main() -> int:
             "temp_mean_apr_jul": ws.temp_mean_apr_jul,
             "heat_stress_days": ws.heat_stress_days,
             "drought_dryspells": ws.drought_dryspells,
+            # Phase-A round-3: soil-moisture + winter-kill features.
+            "sm_jun_jul_mean": ws.sm_jun_jul_mean,
+            "sm_drydown_days": ws.sm_drydown_days,
+            "winter_kill_days": ws.winter_kill_days,
         }
 
     weather_cols = feat_df.apply(_weather_for_row, axis=1, result_type="expand")
@@ -190,7 +198,35 @@ async def main() -> int:
     # surfaces this in the methodology JSON so the UI caveat copy can
     # adapt (synthetic_v3 vs sentinel_hub_v3).
     final["features_origin"] = "sentinel_hub_v3"
-    log.info("Final training rows: %d (iso × year × crop)", len(final))
+    log.info("Final training rows (pre-BBCH): %d (iso × year × crop)", len(final))
+
+    # ─── Phase-A round-3: per-crop BBCH weather features ────────
+    # Need daily weather + crop calendar → 9 phase-resolved aggregates
+    # per (iso, year, crop). Reuse the inference-path helper from
+    # `app.ml.features` so train + inference share identical
+    # arithmetic — important for the conformal-radius coherence guarantee.
+    from app.db.models.enums import CropType  # noqa: E402
+    from app.ml.features import (  # noqa: E402
+        BBCH_PHASE_FEATURES,
+        _bbch_phase_weather,
+    )
+
+    def _bbch_for_row(r: pd.Series) -> dict[str, float | int | None]:
+        daily = daily_map.get(
+            (float(r["centroid_lat"]), float(r["centroid_lon"]), int(r["year"])),
+            [],
+        )
+        try:
+            crop_enum = CropType(r["crop"])
+        except (KeyError, ValueError):
+            return {k: None for k in BBCH_PHASE_FEATURES}
+        return _bbch_phase_weather(daily, crop_enum)
+
+    log.info("Computing BBCH-phase features for %d (iso × year × crop) rows...",
+             len(final))
+    bbch_cols = final.apply(_bbch_for_row, axis=1, result_type="expand")
+    final = pd.concat([final, bbch_cols], axis=1)
+    log.info("Final training rows (with BBCH): %d (iso × year × crop)", len(final))
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     final.to_parquet(OUTPUT, index=False)

@@ -97,24 +97,79 @@ _WHEAT_STACK_V3 = _MODELS_DIR / "yield_stack_wheat_v3.joblib"
     not _WHEAT_STACK_V3.exists(),
     reason="v3 stack artifacts not yet trained (run scripts/train_yield_models_v3.py)",
 )
-def test_registry_loads_stack_v3_for_wheat():
-    """When stack models exist on disk, the registry MUST select stack
-    family as default. v7 → v7h → v6 → v5 → v4 → v3 precedence."""
+def test_registry_loads_best_model_for_wheat():
+    """Inference-time resolution for wheat. Two-mode test:
+
+    1. **With `evaluation_v7_hybrid.json` present** — registry picks the
+       hybrid-evaluator's `selected_family/selected_version` (post-v7+
+       round-2 the winner for wheat is `rf/v7` at test R²=0.638; stack/v7
+       sits at R²=0.36 and is correctly NOT selected).
+    2. **Without the JSON** — falls back to `DEFAULT_PREFERENCE` whose
+       first stack entry on disk wins. This is the legacy behaviour we
+       preserved for fresh clones before retrain.
+
+    Earlier the test asserted "stack wins always" — that was the legacy
+    behaviour and is now wrong: stack/v7 has the lowest test R² of any
+    family for wheat. Per-crop best-of selection from the hybrid
+    evaluator solves this.
+    """
+    from app.ml.registry import (
+        HYBRID_EVAL_PATH,
+        reset_hybrid_eval_preferences_cache,
+    )
+
     ModelRegistry.reset()
+    reset_hybrid_eval_preferences_cache()
     r = ModelRegistry()
     r.load_all()
     pref = r._resolve_default(CropType.WHEAT)
     assert pref is not None
-    assert pref[0] == "stack"  # family is stack
-    assert pref[1] in ("v3", "v4", "v5", "v6", "v7", "v7h")  # whichever's on disk
+    # Family must be one of the four tabular options that have ever been
+    # trained for wheat. Specifically NOT lstm (separate path).
+    assert pref[0] in ("stack", "rf", "xgboost", "lightgbm")
+    assert pref[1] in ("v3", "v4", "v5", "v6", "v7", "v7h")
+
+    if HYBRID_EVAL_PATH.exists():
+        # Post-retrain headline state — hybrid eval picks rf/v7 for
+        # wheat (test R²=0.638). This is the *whole point* of the
+        # per-crop preference; if a future retrain changes the winner
+        # we just accept it (the eval JSON is the source of truth).
+        import json
+
+        body = json.loads(HYBRID_EVAL_PATH.read_text(encoding="utf-8"))
+        wheat_pick = body.get("crops", {}).get("wheat") or {}
+        if wheat_pick.get("selected_family") and wheat_pick.get("selected_version"):
+            assert pref[0] == wheat_pick["selected_family"]
+            assert pref[1] == wheat_pick["selected_version"]
 
     model = r.get_yield_model(CropType.WHEAT)
     assert model is not None
-    # All trainers store stack under "model" key
-    assert "model" in model
+    # Tabular trainers store the regressor under "model" key (RF,
+    # LightGBM, Stack) OR "point" key (XGBoost-triple).
+    assert "model" in model or "point" in model
     assert "features" in model
-    # v3 stack: 17 features; v4/v5/v6/v7h stack: 23 features; v7 stack: 30 (v4 + 7 soil).
-    assert len(model["features"]) in (17, 23, 30)
+    # v3 stack: 17 features; v4/v5/v6 stack: 23 features; v7h stack: 25
+    # (v6 + 2 phenology NDVI features); v7 stack: 32 (v7h + 7 soil);
+    # v7/v7h stack (post-zone): 37 (v7 + 5 agroclimatic-zone one-hots);
+    # v7 stack (post-lag-yield-single): 38 (v7-zone + 1 oblast_yield_lag1);
+    # v7h stack (post-lag-yield-single): 31 (38 - 7 soil, v7h doesn't
+    # carry SoilGrids);
+    # v7 stack (post-multi-year-lag): 41 (v7-zone + 4 lag features:
+    # lag1/lag2/lag3/lag_mean3);
+    # v7h stack (post-multi-year-lag): 34 (41 - 7 soil).
+    # The 25 / 32 figures come from the post-phenology-audit schema
+    # extension that added `ndvi_at_crop_peak_month` +
+    # `ndvi_peak_timing_offset_weeks`. The 37 count came from adding
+    # explicit zone categoricals. The lag-yield extension grew through
+    # two sub-phases: single-year (38/31) and multi-year (41/34) — both
+    # left here in the allow-list because models trained at either
+    # snapshot are still discoverable on disk.
+    # Phase-A round-3 additions: 57 (v7) and 50 (v7h-without-soil =
+    # 57-7). 16 new features = 4 winter NDVI + 3 winter-weather +
+    # 9 BBCH-phase weather aggregates.
+    # Phase-B (v8 multi-task): 70 (v7's 57 + 13 crop one-hots). Single
+    # global model per family covers all 13 crops.
+    assert len(model["features"]) in (17, 23, 25, 30, 32, 37, 38, 31, 41, 34, 57, 50, 70)
 
 
 @pytest.mark.skipif(

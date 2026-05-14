@@ -32,8 +32,15 @@ log = logging.getLogger(__name__)
 
 
 # (crop, start_month, end_month_inclusive, phase_key)
-# Phase keys mirror the i18n keys the frontend uses.
+# Phase keys mirror the i18n keys the frontend uses. Months are 1-12;
+# wraparound is supported (e.g. wheat dormancy `(11, 3)` spans Nov-Mar).
+#
+# Sow / peak / harvest months derive from `data_reference.crop_calendar`;
+# this dict expands them into UI-friendly phase blocks. Keep all 13
+# crops in sync with both `CROP_CALENDAR` AND the frontend
+# `CropCalendarTimeline.PHENOLOGY` mirror.
 PHENOLOGY: dict[str, list[tuple[int, int, str]]] = {
+    # ─── Original three (kept verbatim — visual regression guard) ──
     "wheat": [
         (9, 10, "sowing"),
         (11, 3, "dormancy"),
@@ -55,6 +62,83 @@ PHENOLOGY: dict[str, list[tuple[int, int, str]]] = {
         (7, 7, "flowering"),
         (8, 8, "ripening"),
         (9, 9, "harvest"),
+    ],
+    # ─── Oilseeds ─────────────────────────────────────────────
+    # Soybean — spring sown, R5 canopy peak August, harvest Sept.
+    "soybean": [
+        (5, 5, "sowing"),
+        (6, 6, "growth"),
+        (7, 7, "flowering"),
+        (8, 8, "ripening"),
+        (9, 9, "harvest"),
+    ],
+    # Rapeseed — winter, dormant Oct-Mar, flowers in early May.
+    "rapeseed": [
+        (9, 9, "sowing"),
+        (10, 3, "dormancy"),
+        (4, 4, "growth"),
+        (5, 5, "flowering"),
+        (6, 6, "ripening"),
+        (7, 7, "harvest"),
+    ],
+    # ─── Spring cereals ────────────────────────────────────
+    # Barley — spring (winter barley not differentiated; see calendar doc).
+    "barley": [
+        (4, 4, "sowing"),
+        (5, 5, "growth"),
+        (6, 6, "flowering"),
+        (7, 7, "harvest"),
+    ],
+    # Rye — winter, dormant Nov-Mar like wheat but slightly later sowing.
+    "rye": [
+        (10, 10, "sowing"),
+        (11, 3, "dormancy"),
+        (4, 4, "growth"),
+        (5, 5, "flowering"),
+        (6, 6, "ripening"),
+        (7, 7, "harvest"),
+    ],
+    "oats": [
+        (4, 4, "sowing"),
+        (5, 5, "growth"),
+        (6, 6, "flowering"),
+        (7, 7, "harvest"),
+    ],
+    "buckwheat": [
+        (5, 5, "sowing"),
+        (6, 6, "growth"),
+        (7, 7, "flowering"),
+        (8, 8, "harvest"),
+    ],
+    # ─── Legume ────────────────────────────────────────────
+    "peas": [
+        (4, 4, "sowing"),
+        (5, 5, "growth"),
+        (6, 6, "flowering"),
+        (7, 7, "harvest"),
+    ],
+    # ─── Root crops ────────────────────────────────────────
+    # Sugar beet — long season, canopy May-Jul, root biomass Aug-Sep.
+    "sugar_beet": [
+        (4, 4, "sowing"),
+        (5, 7, "growth"),
+        (8, 9, "ripening"),
+        (10, 10, "harvest"),
+    ],
+    "potato": [
+        (4, 4, "sowing"),
+        (5, 6, "growth"),
+        (7, 7, "flowering"),
+        (8, 8, "ripening"),
+        (9, 9, "harvest"),
+    ],
+    # ─── Forage ────────────────────────────────────────────
+    # Corn silage — same physiology as grain corn but harvested earlier.
+    "corn_silage": [
+        (4, 4, "sowing"),
+        (5, 6, "growth"),
+        (7, 7, "flowering"),
+        (8, 8, "harvest"),
     ],
 }
 
@@ -353,9 +437,107 @@ def oblast_avg_yield(
     return val, yr
 
 
+def oblast_neighbor_yield_mean(
+    oblast_name: str | None, crop: str | None,
+) -> float | None:
+    """Mean yield across the OTHER 12 crops in this oblast for the
+    most-recent year. Phase-D Option B inference-time helper —
+    mirrors the patch-time logic in
+    `scripts/patch_parquet_neighbor_yield.py`.
+
+    Returns None when the oblast can't be resolved or the (oblast,
+    other-crops) intersection is empty. Inference path
+    (`features._neighbor_yield_lag`) falls back to the global crop
+    median in that case so RF/Stack don't see a NaN.
+    """
+    from app.data_reference.oblast_names import iso_from_any_name
+
+    if not oblast_name or not crop:
+        return None
+    iso = iso_from_any_name(oblast_name)
+    if iso is None:
+        return None
+    baseline = _load_oblast_yield_baseline()
+    if not baseline:
+        return None
+    # Pick the most-recent year for which THIS oblast has any neighbor
+    # data — using the same "most-recent year" semantic as
+    # `oblast_avg_yield(year=None)` so the value is "as fresh as
+    # possible" relative to the prediction.
+    candidates_by_year: dict[int, list[float]] = {}
+    for (i, c, yr), val in baseline.items():
+        if i != iso or c == crop:
+            continue
+        candidates_by_year.setdefault(yr, []).append(val)
+    if not candidates_by_year:
+        return None
+    latest_year = max(candidates_by_year.keys())
+    vals = candidates_by_year[latest_year]
+    return float(sum(vals) / len(vals)) if vals else None
+
+
 def reset_oblast_yield_baseline_cache() -> None:
     """Test helper — flush the lru_cache after fixtures rewrite the parquet."""
     _load_oblast_yield_baseline.cache_clear()
+
+
+# ─── Per-crop test R² (from v7-hybrid eval) ────────────────
+#
+# Surfaces the model's actual test-set accuracy per crop so the
+# user-facing OblastComparisonTable can grey out small deltas as
+# "within model uncertainty". Reads `evaluation_v7_hybrid.json` (the
+# hybrid-evaluator's headline output — already file-served by the
+# methodology endpoint). One-shot file read at startup; cached via
+# lru_cache.
+
+
+@lru_cache(maxsize=1)
+def _load_crop_r2_map() -> dict[str, float]:
+    """Crop slug → headline test R² from `evaluation_v7_hybrid.json`.
+
+    The hybrid evaluator records, per crop, the best test R² across
+    the candidate (v6, v7, v7h) × (family) combinations. That number
+    is the right "user-facing accuracy" — it's the R² of the model
+    that actually produced the user's prediction.
+    """
+    import json
+
+    path = Path("data/processed/evaluation_v7_hybrid.json")
+    if not path.exists():
+        log.warning("evaluation_v7_hybrid.json missing — crop R² lookup empty")
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning("Could not load evaluation_v7_hybrid.json: %s", exc)
+        return {}
+
+    out: dict[str, float] = {}
+    for crop, body in (data.get("crops") or {}).items():
+        if not isinstance(body, dict) or body.get("skipped"):
+            continue
+        r2 = body.get("test_r2")
+        if isinstance(r2, (int, float)):
+            out[str(crop)] = round(float(r2), 3)
+    return out
+
+
+def crop_test_r2(crop: str | None) -> float | None:
+    """Headline test R² for `crop`, or None if unknown / not evaluated.
+
+    Used by the dashboard's `OblastComparisonTable` to size the
+    "within-noise" grey band — weaker models get more forgiving
+    thresholds, accurate models a tighter cutoff.
+    """
+    if not crop:
+        return None
+    return _load_crop_r2_map().get(str(crop))
+
+
+def reset_crop_r2_cache() -> None:
+    """Test helper — flush the cached R² map after fixtures rewrite the
+    evaluation file."""
+    _load_crop_r2_map.cache_clear()
 
 
 def reset_oblast_baseline_cache() -> None:
@@ -470,6 +652,7 @@ __all__ = [
     "OBLAST_NAME_UK",
     "PHENOLOGY",
     "compute_risk_score",
+    "crop_test_r2",
     "find_oblast_for_centroid",
     "oblast_avg_ndvi",
     "oblast_avg_yield",
@@ -477,6 +660,7 @@ __all__ = [
     "oblast_name_uk",
     "phenology_calendar",
     "phenology_phase",
+    "reset_crop_r2_cache",
     "reset_oblast_baseline_cache",
     "reset_oblast_polygons_cache",
     "reset_oblast_yield_baseline_cache",

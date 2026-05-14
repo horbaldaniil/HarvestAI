@@ -318,6 +318,33 @@ def build_rows() -> list[dict[str, Any]]:
     n_real = 0
     n_weather_used = 0
 
+    # Phase-C: the legacy `national_yield` YAML block was manually
+    # seeded for 2017-2023 only. To cover historical 2016-data ingested
+    # via the new bl_zvsgk parser (which only writes `per_oblast_yield`),
+    # synthesise the missing-year national value as the mean across
+    # available oblast rows for that (crop, year). This is identical
+    # in spirit to how Держстат computes their headline national mean
+    # — `national = sum(oblast_yield × oblast_share) / total_share` —
+    # but using equal weights since we don't carry per-oblast crop
+    # area shares. Marginal accuracy cost (<3 % on cereals); a 2016
+    # `per_oblast_yield[crop][2016] = {...}` row that previously
+    # produced ZERO CSV rows now produces a full set of feasible
+    # (crop, oblast) rows.
+    if real_yields:
+        for crop in ALL_CROPS:
+            crop_per_year = real_yields.get(crop, {})
+            for year, oblast_dict in crop_per_year.items():
+                national.setdefault(crop, {})
+                if year not in national[crop] and oblast_dict:
+                    values = [v for v in oblast_dict.values() if v is not None]
+                    if values:
+                        national[crop][year] = round(sum(values) / len(values), 3)
+                        log.info(
+                            "Synthesised national_yield[%s][%d] = %.2f t/ha "
+                            "(mean of %d oblasts)",
+                            crop, year, national[crop][year], len(values),
+                        )
+
     for crop in ALL_CROPS:
         per_year = national.get(crop)
         if not per_year:
@@ -327,11 +354,17 @@ def build_rows() -> list[dict[str, Any]]:
         for year, national_value in per_year.items():
             for oblast in oblasts:
                 mult = yield_multiplier(crop, oblast.zone)
-                if mult is None:
-                    skipped_infeasible += 1
-                    continue
-
-                # Priority 1: real per-oblast Держстат yield.
+                # Priority 1: real per-oblast Держстат yield. **Always**
+                # honour real measurements even when `crop_zones` marks
+                # this (crop, zone) combination as "infeasible" — that
+                # flag is a SYNTHESIS guardrail (don't fabricate
+                # sunflower yield for Polissia where commercial
+                # production is marginal), not a filter on actual
+                # Держстат bulletin numbers. If Держстат published a
+                # yield for sunflower in Volyn 2020, that IS a real
+                # measurement and the model deserves to learn from it
+                # — silently dropping it cost ~70 real rows across
+                # rye/buckwheat/sunflower/sugar_beet pre-fix.
                 real_val = _lookup_real_yield(real_yields, crop, year, oblast.iso_3166_2)
                 conflict_year = conflict_since.get(oblast.iso_3166_2)
                 in_conflict = conflict_year is not None and year >= conflict_year
@@ -342,7 +375,13 @@ def build_rows() -> list[dict[str, Any]]:
                     weather_used = False
                     weather_factor = 1.0
                 else:
-                    # Priority 2: weather-conditioned synthesis.
+                    # No real datum — synthesis is only legal when the
+                    # zone × crop combination is flagged feasible. Drop
+                    # the row otherwise so we don't fabricate a yield
+                    # for e.g. sunflower in Polissia.
+                    if mult is None:
+                        skipped_infeasible += 1
+                        continue
                     weather_factor, weather_used = _compute_weather_factor(
                         crop, oblast.iso_3166_2, year, weather, baselines,
                     )

@@ -47,10 +47,28 @@ OUTPUT = ROOT / "data" / "processed" / "training_set_v2.parquet"
 
 
 def aggregate_oblast_year(rows: pd.DataFrame) -> dict[str, float | int | None]:
-    """Roll up the per-sample weekly NDVI/EVI/NDWI/SAVI into 11 features.
+    """Roll up the per-sample weekly NDVI/EVI/NDWI/SAVI into 15 features.
 
-    `rows` must be filtered to one (oblast, year) — multiple samples are
-    averaged via per-week median to keep robust to one-off cloud spikes.
+    `rows` must be filtered to one (oblast, yield_year) — multiple samples
+    are averaged via per-week median to keep robust to one-off cloud
+    spikes. Yield-year semantic: rows can include observations from
+    `yield_year - 1` (Oct-Dec for winter-crop establishment) plus
+    `yield_year` (Jan-Sep). The winter rows are tagged with `year =
+    yield_year` by the collector, so this groupby already pools them
+    correctly.
+
+    Phase-A round-3 extension: in addition to the original 11
+    summer-season features, we now extract 4 winter NDVI features
+    (`ndvi_mean_october/november/march` + `spring_regrowth_ndvi_delta`).
+    These capture winter-crop establishment + survival + spring
+    regrowth — directly addressing the post-mortem's identified blind
+    spot for wheat / barley / rye / rapeseed.
+
+    For yield-years where winter S2 data is missing (e.g. cloud-
+    obscured Oct or pre-2017 era without S2A), the affected month_mean
+    returns None — RF / Stack fall back to crop-train-mean via the
+    same imputation rule as `oblast_yield_lag1`. XGBoost / LightGBM
+    handle NaN natively.
     """
     if rows.empty:
         return {}
@@ -83,6 +101,21 @@ def aggregate_oblast_year(rows: pd.DataFrame) -> dict[str, float | int | None]:
     ndwi_series = weekly["ndwi_mean"].dropna()
     savi_series = weekly["savi_mean"].dropna()
 
+    # Winter NDVI features (Phase-A round-3). `ndvi_october` /
+    # `ndvi_november` capture establishment of autumn-sown crops;
+    # `ndvi_march` captures spring regrowth. `spring_regrowth_delta`
+    # subtracts the two — a high positive value means winter survival
+    # was good and spring re-greening is strong; near-zero or negative
+    # signals winter-kill or sluggish recovery.
+    ndvi_oct = month_mean(10)
+    ndvi_nov = month_mean(11)
+    ndvi_mar = month_mean(3)
+    spring_regrowth = (
+        round(ndvi_mar - ndvi_oct, 3)
+        if ndvi_mar is not None and ndvi_oct is not None
+        else None
+    )
+
     return {
         "ndvi_peak": round(peak_value, 3),
         "ndvi_peak_week": int(peak_week),
@@ -95,6 +128,11 @@ def aggregate_oblast_year(rows: pd.DataFrame) -> dict[str, float | int | None]:
         "evi_peak": round(float(evi_series.max()), 3) if len(evi_series) else 0.0,
         "ndwi_min": round(float(ndwi_series.min()), 3) if len(ndwi_series) else 0.0,
         "savi_peak": round(float(savi_series.max()), 3) if len(savi_series) else 0.0,
+        # Phase-A round-3 winter NDVI additions.
+        "ndvi_mean_october": _r3(ndvi_oct),
+        "ndvi_mean_november": _r3(ndvi_nov),
+        "ndvi_mean_march": _r3(ndvi_mar),
+        "spring_regrowth_ndvi_delta": spring_regrowth,
     }
 
 
@@ -160,7 +198,7 @@ async def main() -> int:
         for k in weather_keys
     ]
     log.info("Fetching weather for %d (lat, lon, year) keys...", len(weather_input))
-    weather_map = await fetch_weather_for_rows(weather_input)
+    weather_map, _daily_map = await fetch_weather_for_rows(weather_input)
 
     def _weather_for_row(r: pd.Series) -> dict[str, float | int]:
         ws: WeatherStats = weather_map.get(

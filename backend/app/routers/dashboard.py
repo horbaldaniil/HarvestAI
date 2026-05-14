@@ -40,6 +40,7 @@ from app.schemas.prediction import (
 )
 from app.services.dashboard_analytics import (
     compute_risk_score,
+    crop_test_r2,
     find_oblast_for_centroid,
     oblast_avg_ndvi,
     oblast_avg_yield,
@@ -288,6 +289,11 @@ async def get_dashboard(
             "oblast_baseline_year": oblast_yr,
             "oblast_avg_yield_tha": oblast_yield_avg,
             "oblast_avg_yield_year": oblast_yield_year,
+            # Per-crop headline test R² from `evaluation_v7_hybrid.json`.
+            # Drives the OblastComparisonTable's "within noise" greyed-
+            # out delta band — weak models (R² < 0.5) get wider tolerance
+            # before a divergence from oblast baseline is flagged.
+            "model_r2_for_crop": crop_test_r2(crop_val),
             "geometry": _field_polygon_geojson(f),
         }
         field_rows.append(DashboardFieldRow(**row_dict))

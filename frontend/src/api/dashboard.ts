@@ -41,6 +41,13 @@ export interface DashboardFieldRow {
   oblast_avg_yield_tha: number | null;
   /** Year the yield baseline came from (typically 2021). */
   oblast_avg_yield_year: number | null;
+  /**
+   * Headline test R² for this crop from the v7-hybrid evaluator (test
+   * year 2021, real Держстат yields). Frontend uses it to size the
+   * OblastComparisonTable "within noise" grey band — weak models get
+   * wider tolerance before |Δ%| triggers a red flag.
+   */
+  model_r2_for_crop: number | null;
   geometry: GJPolygon | null;
 }
 

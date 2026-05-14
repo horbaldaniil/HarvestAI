@@ -41,6 +41,14 @@ class PredictionRead(BaseModel):
     # this row so page-views don't re-call OpenAI. NULL if the LLM
     # wasn't configured or the call failed — UI hides the block.
     summary_text: str | None = None
+    # Phase-C empirical-Bayes shrinkage diagnostics. `shrinkage_weight`
+    # is the share of `value_tha` sourced from the regional baseline
+    # (0 = pure ML, 1 = full fallback to most-recent Держстат yield).
+    # `raw_ml_value_tha` is the pre-shrinkage point estimate. Both NULL
+    # on pre-migration rows; the UI hides the diagnostic when either
+    # is missing.
+    shrinkage_weight: float | None = None
+    raw_ml_value_tha: float | None = None
     predicted_at: datetime
 
 
@@ -139,6 +147,12 @@ class DashboardFieldRow(BaseModel):
     # older if 2021 is missing for that crop). Lets the UI label the
     # comparison honestly ("Середнє по області, 2021").
     oblast_avg_yield_year: int | None = None
+    # Headline test R² for this crop from `evaluation_v7_hybrid.json`.
+    # The frontend uses it to dynamically size the "within noise" grey
+    # band in the OblastComparisonTable — weaker models (R² < 0.5) get
+    # more tolerant thresholds before a delta-from-baseline is flagged
+    # as significant. None when the crop wasn't evaluated.
+    model_r2_for_crop: float | None = None
     # GeoJSON Polygon for the mini-map on the dashboard. Allows the UI to
     # render all fields in one round-trip without hitting /api/fields.
     geometry: dict | None = None

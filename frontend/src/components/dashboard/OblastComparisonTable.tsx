@@ -1,9 +1,15 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Info, MapPin } from "lucide-react";
 
 import type { DashboardFieldRow } from "@/api/dashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Props {
   fields: DashboardFieldRow[];
@@ -12,11 +18,40 @@ interface Props {
 interface ComparisonRow {
   field_id: number;
   name: string;
+  crop_type: string;
   predicted_tha: number;
   oblast_avg_yield_tha: number;
   oblast_name: string | null;
   baseline_year: number | null;
   delta_pct: number;
+  model_r2: number | null;
+  significance: "within_noise" | "significant" | "unknown";
+  grey_band_pct: number;
+}
+
+
+/**
+ * Threshold that splits "within model uncertainty" from "significant
+ * deviation" for the |Δ%| value vs oblast baseline.
+ *
+ * Empirically: at R²=0.5 a ~20% gap is roughly within the model's
+ * own error band; at R²=0.8 the band tightens to ~10%. The (1-R²)×40
+ * formula gives a single knob that scales the grey-out radius with
+ * the model's actual test accuracy for that crop. Weak crops get
+ * forgiveness, strong crops get sharper signal.
+ */
+function greyBandPct(r2: number | null): number {
+  if (r2 === null || r2 <= 0) return 25; // unknown / negative R² → default 25%
+  return Math.max(5, (1 - r2) * 40);
+}
+
+
+function gapSignificance(
+  r2: number | null,
+  delta_pct: number,
+): "within_noise" | "significant" | "unknown" {
+  if (r2 === null) return "unknown";
+  return Math.abs(delta_pct) < greyBandPct(r2) ? "within_noise" : "significant";
 }
 
 /**
@@ -42,6 +77,7 @@ interface ComparisonRow {
  */
 export function OblastComparisonTable({ fields }: Props) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const rows = useMemo<ComparisonRow[]>(() => {
     return fields
       .filter(
@@ -56,14 +92,19 @@ export function OblastComparisonTable({ fields }: Props) {
         // clamp so we never produce Infinity or absurd % values.
         const denom = f.oblast_avg_yield_tha > 0 ? f.oblast_avg_yield_tha : 1;
         const delta_pct = ((f.predicted_tha - f.oblast_avg_yield_tha) / denom) * 100;
+        const grey_band_pct = greyBandPct(f.model_r2_for_crop);
         return {
           field_id: f.field_id,
           name: f.name,
+          crop_type: f.crop_type,
           predicted_tha: f.predicted_tha,
           oblast_avg_yield_tha: f.oblast_avg_yield_tha,
           oblast_name: f.oblast_name,
           baseline_year: f.oblast_avg_yield_year,
           delta_pct,
+          model_r2: f.model_r2_for_crop,
+          significance: gapSignificance(f.model_r2_for_crop, delta_pct),
+          grey_band_pct,
         };
       })
       .sort((a, b) => Math.abs(b.delta_pct) - Math.abs(a.delta_pct));
@@ -85,6 +126,15 @@ export function OblastComparisonTable({ fields }: Props) {
         {baselineYear !== null && (
           <p className="text-xs text-muted-foreground">
             База порівняння — фактичні Держстат-урожаї {baselineYear} р.
+            {/* When the baseline is more than 1 year behind today's
+                year, surface the staleness so users don't read it as
+                "this year's yield" — happens for late-harvest crops
+                (sugar_beet / corn / potato) whose November bulletin
+                drops after the dashboard already showed a comparison
+                against the prior year. */}
+            {baselineYear < new Date().getFullYear() - 1 && (
+              <span className="italic"> (найсвіжіший доступний)</span>
+            )}
           </p>
         )}
       </CardHeader>
@@ -131,18 +181,18 @@ export function OblastComparisonTable({ fields }: Props) {
                     <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
                       {r.oblast_avg_yield_tha.toFixed(1)}
                     </td>
-                    <td
-                      className={`px-2 py-2 text-right tabular-nums font-medium ${
-                        r.delta_pct >= 0 ? "text-emerald-600" : "text-red-600"
-                      }`}
-                    >
-                      {r.delta_pct >= 0 ? "+" : ""}
-                      {r.delta_pct.toFixed(1)}%
+                    <td className="px-2 py-2 text-right">
+                      <DeltaCell row={r} t={t} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <p className="border-t bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
+              Сірим кольором — відхилення в межах похибки моделі для
+              культури (наведіть курсор на «ⓘ»). База точності — test
+              2021 (R² на реальних Держстат-урожаях).
+            </p>
             {fields.length > rows.length && (
               <p className="border-t bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
                 Ще {fields.length - rows.length}{" "}
@@ -162,6 +212,78 @@ export function OblastComparisonTable({ fields }: Props) {
     </Card>
   );
 }
+
+/**
+ * Renders the Δ% cell — coloured red/green for significant gaps,
+ * greyed out with a tooltip for gaps within the model's own error
+ * band. The tooltip explains the calibration: "model for this crop
+ * explains ~N% of variance; deviations under ~M% are within noise".
+ */
+function DeltaCell({
+  row,
+  t,
+}: {
+  row: ComparisonRow;
+  t: (key: string) => string;
+}) {
+  const sign = row.delta_pct >= 0 ? "+" : "";
+  const formatted = `${sign}${row.delta_pct.toFixed(1)}%`;
+
+  // Within-noise band: grey, info-icon, tooltip with model accuracy.
+  if (row.significance === "within_noise") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 tabular-nums font-medium text-muted-foreground">
+            {formatted}
+            <Info className="h-3 w-3 opacity-60" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="max-w-[280px] text-xs">
+          У межах похибки моделі.{" "}
+          {row.model_r2 !== null && (
+            <>
+              Для культури «{t(`fields.crops.${row.crop_type}`)}» модель
+              пояснює близько {(row.model_r2 * 100).toFixed(0)}% варіації
+              врожайності, тому відхилення менше ~
+              {row.grey_band_pct.toFixed(0)}% від обласного середнього є
+              нормальним коливанням.
+            </>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  // Significant gap: red/green + tooltip explaining what to check.
+  const colour =
+    row.delta_pct >= 0 ? "text-emerald-600" : "text-red-600";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`inline-flex items-center gap-1 tabular-nums font-medium ${colour}`}
+        >
+          {formatted}
+          <Info className="h-3 w-3 opacity-50" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-[280px] text-xs">
+        Значне відхилення від обласного середнього.{" "}
+        {row.model_r2 !== null && (
+          <>
+            Модель для культури «{t(`fields.crops.${row.crop_type}`)}»
+            пояснює близько {(row.model_r2 * 100).toFixed(0)}% варіації —
+            різниця понад ~{row.grey_band_pct.toFixed(0)}% виходить за
+            межі типової похибки і варта перевірки (NDVI поточного
+            сезону, ґрунтові умови, історія сівозміни).
+          </>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 
 function EmptyState({
   fieldsTotal,

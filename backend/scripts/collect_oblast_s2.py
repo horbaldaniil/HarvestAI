@@ -68,8 +68,50 @@ PU_PER_CALL_ESTIMATE = 3.0
 # advisory; the API itself enforces nothing here.
 DEFAULT_MONTHLY_BUDGET_PU = 30_000
 
+# Legacy summer window constants (Apr 1 – Sep 30). Kept for back-compat
+# with older callers; new code uses `_window_date_ranges()` below.
 WINDOW_START_MMDD = (4, 1)
 WINDOW_END_MMDD = (9, 30)
+
+
+def _window_date_ranges(yield_year: int, window: str) -> list[tuple[date, date]]:
+    """Return list of (start, end) `date` tuples for the requested window.
+
+    The `yield_year` semantic is the **harvest year** — what the
+    training set's `year` column means. For winter crops sown the prior
+    October, the meaningful S2 signal lives in Oct(yield-1) → Mar(yield).
+
+    - `summer`: Apr 1 – Sep 30 of `yield_year` (legacy behaviour).
+    - `winter`: Oct 1 of `yield_year-1` to Mar 31 of `yield_year`
+       (two sub-ranges; Sentinel Hub's Statistical API accepts a single
+       `timeRange` per call, so two calls are needed). Tags rows with
+       `year=yield_year` so the downstream aggregator can join them with
+       the summer rows that share the same yield-year key.
+    - `full`: Jan 1 – Dec 31 of `yield_year` (single call; convenient
+       for one-shot collection without the cropping-year split).
+    """
+    if window == "summer":
+        return [(date(yield_year, *WINDOW_START_MMDD),
+                 date(yield_year, *WINDOW_END_MMDD))]
+    if window == "winter":
+        return [
+            (date(yield_year - 1, 10, 1), date(yield_year - 1, 12, 31)),
+            (date(yield_year, 1, 1), date(yield_year, 3, 31)),
+        ]
+    if window == "full":
+        return [(date(yield_year, 1, 1), date(yield_year, 12, 31))]
+    raise ValueError(f"Unknown window: {window!r}; expected summer/winter/full")
+
+
+# Months belonging to each window. Used by `_load_existing` to detect
+# whether a (sample, yield_year) bucket is already covered for a given
+# window — winter and summer rows coexist in the same parquet, so we
+# need to slice by `observed_on.month` to tell them apart.
+_WINDOW_MONTHS: dict[str, frozenset[int]] = {
+    "summer": frozenset({4, 5, 6, 7, 8, 9}),
+    "winter": frozenset({10, 11, 12, 1, 2, 3}),
+    "full":   frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}),
+}
 
 
 def _parse_years(spec: str | None) -> tuple[int, ...] | None:
@@ -100,16 +142,35 @@ def _resolve_output_path(explicit: Path | None, samples_path: Path) -> Path:
     return OUTPUT_V3 if samples_path == SAMPLES_V3 else OUTPUT_V2
 
 
-def _load_existing(output_path: Path) -> set[tuple[str, int, int]]:
-    """Return (oblast, sample_idx, year) tuples already collected."""
+def _load_existing(
+    output_path: Path, window: str = "summer",
+) -> set[tuple[str, int, int]]:
+    """Return (oblast, sample_idx, yield_year) tuples already collected
+    for the given window.
+
+    Detects window membership from `observed_on.month` so that summer
+    and winter rows can coexist in the same parquet under the same
+    `year` column (yield-year semantic). Without this filter, a summer
+    2021 collection would mark "winter 2021 collected too" and we'd
+    skip the winter fetch."""
     if not output_path.exists():
         return set()
     try:
-        df = pd.read_parquet(output_path, columns=["oblast", "sample_idx", "year"])
+        df = pd.read_parquet(
+            output_path,
+            columns=["oblast", "sample_idx", "year", "observed_on"],
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not read existing parquet (%s) — starting fresh.", exc)
         return set()
-    return set(map(tuple, df.drop_duplicates().values.tolist()))
+    months = _WINDOW_MONTHS.get(window, _WINDOW_MONTHS["summer"])
+    # observed_on is stored as ISO string by `_fetch_one`. Parse to
+    # extract month cheaply (avoid full datetime conversion).
+    df["obs_month"] = pd.to_datetime(df["observed_on"], errors="coerce").dt.month
+    sub = df[df["obs_month"].isin(months)]
+    return set(
+        map(tuple, sub[["oblast", "sample_idx", "year"]].drop_duplicates().values.tolist())
+    )
 
 
 def _append(rows: list[dict], output_path: Path) -> None:
@@ -129,27 +190,39 @@ async def _fetch_one(
     client: SentinelHubClient,
     geometry: dict,
     year: int,
+    window: str = "summer",
 ) -> tuple[list[dict], float]:
-    start = date(year, *WINDOW_START_MMDD)
-    end = date(year, *WINDOW_END_MMDD)
-    aggregates, pu_used = await fetch_indices_timeseries(
-        client, geometry, start, end, max_cloud_cover=40,
-    )
-    return [
-        {
-            "observed_on": a.observed_on.isoformat() if a.observed_on else None,
-            "iso_week": a.observed_on.isocalendar().week if a.observed_on else None,
-            "ndvi_mean": a.ndvi_mean,
-            "ndvi_min": a.ndvi_min,
-            "ndvi_max": a.ndvi_max,
-            "ndvi_std": a.ndvi_std,
-            "evi_mean": a.evi_mean,
-            "ndwi_mean": a.ndwi_mean,
-            "savi_mean": a.savi_mean,
-            "cloud_cover": a.cloud_cover,
-        }
-        for a in aggregates
-    ], pu_used
+    """Fetch S2 weekly aggregates for one (sample, yield_year, window).
+
+    Winter window straddles two calendar years and requires two
+    Sentinel Hub API calls (the Statistical API accepts only one
+    `timeRange` per request). We concatenate the returned aggregates
+    so downstream callers see a single time-ordered list of weekly
+    rows tagged with `year=yield_year` regardless of which sub-range
+    they came from.
+    """
+    ranges = _window_date_ranges(year, window)
+    all_rows: list[dict] = []
+    total_pu = 0.0
+    for start, end in ranges:
+        aggregates, pu_used = await fetch_indices_timeseries(
+            client, geometry, start, end, max_cloud_cover=40,
+        )
+        total_pu += pu_used
+        for a in aggregates:
+            all_rows.append({
+                "observed_on": a.observed_on.isoformat() if a.observed_on else None,
+                "iso_week": a.observed_on.isocalendar().week if a.observed_on else None,
+                "ndvi_mean": a.ndvi_mean,
+                "ndvi_min": a.ndvi_min,
+                "ndvi_max": a.ndvi_max,
+                "ndvi_std": a.ndvi_std,
+                "evi_mean": a.evi_mean,
+                "ndwi_mean": a.ndwi_mean,
+                "savi_mean": a.savi_mean,
+                "cloud_cover": a.cloud_cover,
+            })
+    return all_rows, total_pu
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -176,8 +249,13 @@ async def run(args: argparse.Namespace) -> int:
     log.info("Years to collect: %s", list(years))
     log.info("Output parquet: %s", output_path)
 
-    existing = _load_existing(output_path)
-    log.info("Already collected: %d (sample, year) buckets", len(existing))
+    window = getattr(args, "window", "summer")
+    log.info("Window: %s (date ranges per year: %s)",
+             window,
+             [(s.isoformat(), e.isoformat()) for s, e in _window_date_ranges(years[0], window)])
+    existing = _load_existing(output_path, window=window)
+    log.info("Already collected for window=%s: %d (sample, year) buckets",
+             window, len(existing))
 
     plan: list[tuple[str, int, int, dict]] = []
     for _, row in samples.iterrows():
@@ -221,7 +299,9 @@ async def run(args: argparse.Namespace) -> int:
     try:
         for i, (oblast, idx, year, geometry) in enumerate(plan, 1):
             try:
-                aggregates, pu_used = await _fetch_one(client, geometry, year)
+                aggregates, pu_used = await _fetch_one(
+                    client, geometry, year, window=window,
+                )
                 total_pu += pu_used
                 for row in aggregates:
                     row.update(oblast=oblast, sample_idx=idx, year=year)
@@ -262,6 +342,11 @@ def main() -> int:
                         help="year selection: 'YYYY', 'YYYY-YYYY', or 'YYYY,YYYY,YYYY'")
     parser.add_argument("--max-calls", type=int, default=None,
                         help="cap to N API calls (useful for PU-budget guard)")
+    parser.add_argument("--window", choices=("summer", "winter", "full"),
+                        default="summer",
+                        help="time window per yield-year: 'summer' (Apr-Sep, default — legacy), "
+                             "'winter' (Oct-Mar spanning yield-1→yield, for winter-crop signals), "
+                             "or 'full' (Jan-Dec)")
     parser.add_argument("--dry-run", action="store_true",
                         help="show plan + estimated PU; no fetching")
     args = parser.parse_args()

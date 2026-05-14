@@ -52,6 +52,52 @@ def test_phenology_calendar_lists_all_phases():
     assert all(1 <= p["end_month"] <= 12 for p in cal)
 
 
+# ─── Phenology coverage for the post-v7 expanded crop list ─
+
+
+def test_phenology_soybean_august_is_ripening():
+    """Soybean phenology: R5 full-canopy in August is the 'ripening'
+    block per the post-v7 calendar (peak_month was moved 7 → 8)."""
+    assert phenology_phase("soybean", date(2026, 8, 15)) == "ripening"
+
+
+def test_phenology_rapeseed_winter_dormancy_wraps():
+    """Winter rapeseed dormancy spans October-March — same wraparound
+    pattern as wheat/rye, sown one month earlier (September)."""
+    assert phenology_phase("rapeseed", date(2026, 9, 10)) == "sowing"
+    assert phenology_phase("rapeseed", date(2026, 12, 20)) == "dormancy"
+    assert phenology_phase("rapeseed", date(2026, 2, 5)) == "dormancy"
+    assert phenology_phase("rapeseed", date(2026, 5, 10)) == "flowering"
+
+
+def test_phenology_sugar_beet_long_season():
+    """Sugar beet has the longest season among the 13 crops: April
+    sowing → harvest October. May-July is canopy 'growth' (a 3-month
+    span), August-September 'ripening' (root biomass)."""
+    assert phenology_phase("sugar_beet", date(2026, 4, 10)) == "sowing"
+    assert phenology_phase("sugar_beet", date(2026, 6, 1)) == "growth"
+    assert phenology_phase("sugar_beet", date(2026, 9, 15)) == "ripening"
+    assert phenology_phase("sugar_beet", date(2026, 10, 5)) == "harvest"
+
+
+def test_phenology_all_13_crops_have_entries():
+    """Regression guard: every crop in `CropType` should have a phase
+    block. Catches the case where someone adds a new crop to the enum
+    without also extending PHENOLOGY (caused 'silent UI degradation'
+    in the post-v7 cleanup audit)."""
+    from app.services.dashboard_analytics import PHENOLOGY
+
+    expected = {
+        "wheat", "corn", "sunflower",
+        "soybean", "rapeseed",
+        "barley", "rye", "oats", "buckwheat",
+        "peas",
+        "sugar_beet", "potato",
+        "corn_silage",
+    }
+    assert set(PHENOLOGY.keys()) == expected
+
+
 # ─── Risk score ─────────────────────────────────────────────
 
 

@@ -33,6 +33,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import logging
 import sys
@@ -54,6 +55,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.data_reference.crop_zones import ALL_CROPS  # noqa: E402
+
+# Optuna-tuned hyperparameters, when present, override the hand-tuned
+# constants embedded in each `_train_*` helper below. See
+# `scripts/optuna_tune_v7.py` for the sweep that generates this JSON
+# and the rationale for restricting to 5 weak crops.
+OPTUNA_BEST_PATH = ROOT / "data" / "processed" / "optuna_best_params_v7.json"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("train_yield_v7")
@@ -98,16 +105,123 @@ FEATURE_NAMES: tuple[str, ...] = (
     "sand",    # % mass
     "silt",    # % mass
     "soc",     # soil organic carbon (g/kg)
-    # v5 crop-specific extensions — 6 new features
+    # Agroclimatic zone one-hot encoding — 5 categories matching the
+    # `OblastRef.zone` literal. Lets tree models learn that Lviv-zone
+    # barley typically yields ~4.7 t/ha vs Steppe-zone barley ~2.5 t/ha;
+    # something the continuous centroid_lat/lon couldn't represent.
+    "zone_polissia",
+    "zone_forest_steppe",
+    "zone_steppe_north",
+    "zone_steppe_south",
+    "zone_transcarpathia",
+    # Lagged regional yield baselines (4 features). Multi-horizon
+    # design — tree models pick whichever lag carries the most signal
+    # via SHAP-importance. Stable cereals (rye, oats) tend to rely on
+    # `lag_mean3` (the 3-year arithmetic mean smooths year-to-year
+    # noise); volatile crops like sugar_beet pick `lag1`. Anti-leakage
+    # is enforced at parquet-patch time (year-N never includes the
+    # current year). See `app/ml/features.py:OBLAST_LAG_FEATURES`.
+    "oblast_yield_lag1",
+    "oblast_yield_lag2",
+    "oblast_yield_lag3",
+    "oblast_yield_lag_mean3",
+    # Phase-D Option B tried adding `neighbor_yield_lag1_mean` here —
+    # reverted because wheat regressed 0.08 R² without a fresh
+    # Optuna sweep on the wider schema. Patcher + helper remain in
+    # place; re-add this line when re-running the Optuna sweep.
+    # Phase-A round-3 (Oct 2025): winter NDVI features. October /
+    # November capture autumn establishment of winter crops; March
+    # captures spring regrowth post-dormancy. The delta is a winter-
+    # survival proxy. See `app/ml/features.py:WINTER_NDVI_FEATURES`.
+    "ndvi_mean_october",
+    "ndvi_mean_november",
+    "ndvi_mean_march",
+    "spring_regrowth_ndvi_delta",
+    # Phase-A round-3: soil-moisture + winter-kill features. Address
+    # the missing tuber-bulking (potato / sugar_beet) and winter-kill
+    # (wheat / barley / rye / rapeseed) signals.
+    "sm_jun_jul_mean",
+    "sm_drydown_days",
+    "winter_kill_days",
+    # Phase-A round-3: BBCH-aligned weather windows. Replace the
+    # one-size-fits-all Apr-Jul aggregate with per-phase splits.
+    # Tree models pick whichever phase × variable combination carries
+    # the highest signal for each crop via SHAP-importance ranking.
+    "precip_early_veg",
+    "precip_flowering",
+    "precip_grain_fill",
+    "temp_mean_flowering",
+    "temp_mean_grain_fill",
+    "heat_days_flowering",
+    "heat_days_grain_fill",
+    "drought_days_flowering",
+    "drought_days_grain_fill",
+    # v5 crop-specific extensions — 6 weather-derived features
     "crop_season_overlap_aprjul",
     "gdd_proxy",
     "precip_crop_weighted",
     "heat_stress_crop_weighted",
     "drought_crop_weighted",
     "growing_season_length_months",
+    # Post-phenology-audit extension — 2 crop-aligned NDVI features.
+    # `ndvi_at_crop_peak_month` reads the right monthly NDVI slot for
+    # each crop's natural peak (wheat May, corn July, sugar_beet
+    # August — previously all crops got the same Apr-Jul NDVI mean).
+    # `ndvi_peak_timing_offset_weeks` is a signed week-difference
+    # vs the expected peak — early peak = drought stress signal,
+    # late peak = cold spring signal.
+    "ndvi_at_crop_peak_month",
+    "ndvi_peak_timing_offset_weeks",
 )
 
 ALL_FAMILIES: tuple[str, ...] = ("rf", "xgboost", "lightgbm", "stack")
+
+
+# Crops where the target yield has a wide value range (>~15× ratio
+# max:min) and is right-skewed enough that MSE-loss is dominated by
+# the high-value tail. Applying `np.log1p(yield)` before fit and
+# `np.expm1(preds)` after predict produces a more uniform error
+# distribution and tightens the conformal CI for these crops.
+#
+# Empirically, the three included here have:
+#   sugar_beet  raw range 26-67 т/га   (~2.6× ratio in real Держстат)
+#   potato      raw range  8-22 т/га   (~2.8×)
+#   corn_silage raw range  7-50 т/га   (~7×, biggest payoff)
+#
+# Wheat-class crops (1-7 т/га range, ratio ~5-7×) gain less from
+# log-target because the absolute differences at the high end are
+# already small in т/га, and the post-`expm1` predictions introduce
+# their own asymmetric bias that's worse than the raw MSE issue.
+LOG_TARGET_CROPS: frozenset[str] = frozenset({
+    "sugar_beet", "potato", "corn_silage",
+})
+
+
+@functools.lru_cache(maxsize=1)
+def _load_optuna_best() -> dict[str, dict[str, dict[str, Any]]]:
+    """`{crop: {family: {param_name: value, ..., cv_r2: float}}}`.
+
+    Returns empty dict if the Optuna sweep hasn't run yet (or the JSON
+    is malformed). Trainers then fall back to the hand-tuned hyperparam
+    constants embedded in `_train_*` helpers — backward compatible.
+    """
+    if not OPTUNA_BEST_PATH.exists():
+        return {}
+    try:
+        blob = json.loads(OPTUNA_BEST_PATH.read_text(encoding="utf-8"))
+        return blob.get("by_crop", {})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not load Optuna best params: %s", exc)
+        return {}
+
+
+def _optuna_overrides(crop: str, family: str) -> dict[str, Any]:
+    """Optuna-tuned hyperparams for `(crop, family)` minus the `cv_r2`
+    score key. Empty dict means no overrides — `_train_*` falls back
+    to the hand-tuned constants below.
+    """
+    blob = _load_optuna_best().get(crop, {}).get(family, {})
+    return {k: v for k, v in blob.items() if k != "cv_r2"}
 
 
 @dataclass
@@ -158,27 +272,43 @@ def _split_chronological(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, 
 # ─── Per-family training functions ─────────────────────────
 
 
-def _train_rf(X_train: np.ndarray, y_train: np.ndarray) -> Any:
-    rf = RandomForestRegressor(
+def _train_rf(X_train: np.ndarray, y_train: np.ndarray,
+              crop: str | None = None) -> Any:
+    """Hand-tuned defaults; if Optuna has a `(crop, 'rf')` best-params
+    entry, those keys override the defaults. `random_state` and
+    `n_jobs` are never overridden by Optuna — they're plumbing, not
+    hyperparameters."""
+    params: dict[str, Any] = dict(
         n_estimators=300, max_depth=None, min_samples_leaf=2,
-        n_jobs=-1, random_state=42,
     )
+    if crop:
+        params.update(_optuna_overrides(crop, "rf"))
+    rf = RandomForestRegressor(n_jobs=-1, random_state=42, **params)
     rf.fit(X_train, y_train)
     return rf
 
 
 def _train_xgboost(X_train: np.ndarray, y_train: np.ndarray,
                    X_val: np.ndarray | None = None,
-                   y_val: np.ndarray | None = None) -> dict[str, Any]:
+                   y_val: np.ndarray | None = None,
+                   crop: str | None = None) -> dict[str, Any]:
     """Returns a dict with the point estimator + two quantile models
-    for 5th / 95th percentile prediction intervals."""
+    for 5th / 95th percentile prediction intervals.
+
+    When `crop` is in the Optuna-swept set, the per-(crop, xgboost)
+    best params override the hand-tuned defaults for ALL three sibling
+    models (point + q_low + q_high). They share the same architecture
+    by design — different objectives but identical capacity.
+    """
     import xgboost as xgb
 
     common: dict[str, Any] = dict(
         n_estimators=400, max_depth=5, learning_rate=0.05,
         subsample=0.85, colsample_bytree=0.85,
-        random_state=42, n_jobs=-1, tree_method="hist",
     )
+    if crop:
+        common.update(_optuna_overrides(crop, "xgboost"))
+    common.update(random_state=42, n_jobs=-1, tree_method="hist")
 
     point = xgb.XGBRegressor(objective="reg:squarederror", **common)
     if X_val is not None:
@@ -196,13 +326,18 @@ def _train_xgboost(X_train: np.ndarray, y_train: np.ndarray,
 
 def _train_lightgbm(X_train: np.ndarray, y_train: np.ndarray,
                     X_val: np.ndarray | None = None,
-                    y_val: np.ndarray | None = None) -> Any:
+                    y_val: np.ndarray | None = None,
+                    crop: str | None = None) -> Any:
     import lightgbm as lgb
 
-    model = lgb.LGBMRegressor(
-        n_estimators=400, max_depth=-1, num_leaves=31,
+    params: dict[str, Any] = dict(
+        n_estimators=400, num_leaves=31,
         learning_rate=0.05, subsample=0.85, colsample_bytree=0.85,
-        random_state=42, n_jobs=-1, verbose=-1,
+    )
+    if crop:
+        params.update(_optuna_overrides(crop, "lightgbm"))
+    model = lgb.LGBMRegressor(
+        max_depth=-1, random_state=42, n_jobs=-1, verbose=-1, **params,
     )
     if X_val is not None:
         model.fit(
@@ -215,7 +350,8 @@ def _train_lightgbm(X_train: np.ndarray, y_train: np.ndarray,
     return model
 
 
-def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray) -> Any:
+def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray,
+                 crop: str | None = None) -> Any:
     """StackingRegressor: RF + XGB + LGBM → Ridge meta-learner.
 
     Stacking requires each row to receive *exactly one* OOF prediction
@@ -234,27 +370,47 @@ def _train_stack(X_trainval: np.ndarray, y_trainval: np.ndarray) -> Any:
     import lightgbm as lgb
     import xgboost as xgb
 
+    # When Optuna best params exist for this crop, the stack base
+    # learners inherit them from the standalone (crop, family) sweeps;
+    # the meta Ridge alpha comes from the stack-specific sub-study.
+    # The hand-tuned defaults below kick in for crops outside the
+    # Optuna-sweep set (the 8 strong crops).
+    rf_params: dict[str, Any] = dict(
+        n_estimators=200, max_depth=None, min_samples_leaf=2,
+    )
+    xgb_params: dict[str, Any] = dict(
+        n_estimators=300, max_depth=5, learning_rate=0.05,
+        subsample=0.85, colsample_bytree=0.85,
+    )
+    lgbm_params: dict[str, Any] = dict(
+        n_estimators=300, num_leaves=31, learning_rate=0.05,
+        subsample=0.85, colsample_bytree=0.85,
+    )
+    ridge_alpha = 1.0
+    if crop:
+        rf_params.update(_optuna_overrides(crop, "rf"))
+        xgb_params.update(_optuna_overrides(crop, "xgboost"))
+        lgbm_params.update(_optuna_overrides(crop, "lightgbm"))
+        stack_overrides = _optuna_overrides(crop, "stack")
+        if "ridge_alpha" in stack_overrides:
+            ridge_alpha = float(stack_overrides["ridge_alpha"])
+
     cv = KFold(n_splits=5, shuffle=True, random_state=42)
     base = [
         ("rf", RandomForestRegressor(
-            n_estimators=200, max_depth=None, min_samples_leaf=2,
-            n_jobs=-1, random_state=42,
+            n_jobs=-1, random_state=42, **rf_params,
         )),
         ("xgb", xgb.XGBRegressor(
-            n_estimators=300, max_depth=5, learning_rate=0.05,
-            subsample=0.85, colsample_bytree=0.85,
             random_state=42, n_jobs=-1, tree_method="hist",
-            objective="reg:squarederror", verbosity=0,
+            objective="reg:squarederror", verbosity=0, **xgb_params,
         )),
         ("lgbm", lgb.LGBMRegressor(
-            n_estimators=300, learning_rate=0.05, num_leaves=31,
-            subsample=0.85, colsample_bytree=0.85,
-            random_state=42, n_jobs=-1, verbose=-1,
+            random_state=42, n_jobs=-1, verbose=-1, **lgbm_params,
         )),
     ]
     stack = StackingRegressor(
         estimators=base,
-        final_estimator=Ridge(alpha=1.0),
+        final_estimator=Ridge(alpha=ridge_alpha),
         cv=cv,
         n_jobs=1,  # base learners already parallelise — outer jobs=1 avoids fork bombs
         passthrough=False,
@@ -285,10 +441,21 @@ def _save_metrics(metrics: dict) -> None:
     log.info("Wrote %s", METRICS_OUT)
 
 
-def _eval_helper(model: Any, X: np.ndarray, y: np.ndarray) -> dict:
-    """Compute the metric set for one split."""
-    preds = np.asarray(model.predict(X)) if len(y) else np.array([])
-    return asdict(_compute_metrics(np.asarray(y), preds))
+def _eval_helper(model: Any, X: np.ndarray, y_orig: np.ndarray,
+                 *, log_target: bool = False) -> dict:
+    """Compute the metric set for one split, always on the **original**
+    yield scale.
+
+    When `log_target=True` the model was trained on `np.log1p(y)`, so
+    its `.predict()` output lives in log-space; we invert via
+    `np.expm1` before computing metrics. The `y_orig` argument is
+    therefore always the original-scale yield (т/га) regardless of
+    whether the model is log-trained.
+    """
+    preds = np.asarray(model.predict(X)) if len(y_orig) else np.array([])
+    if log_target and len(preds):
+        preds = np.expm1(preds)
+    return asdict(_compute_metrics(np.asarray(y_orig), preds))
 
 
 # ─── Main loop ─────────────────────────────────────────────
@@ -303,68 +470,81 @@ def train_one_crop(crop: str, df: pd.DataFrame, families: tuple[str, ...],
 
     train, val, test = _split_chronological(sub)
     X_train = train[list(FEATURE_NAMES)].to_numpy()
-    y_train = train["yield_tha"].to_numpy()
     X_val = val[list(FEATURE_NAMES)].to_numpy() if len(val) else np.empty((0, len(FEATURE_NAMES)))
-    y_val = val["yield_tha"].to_numpy()
     X_test = test[list(FEATURE_NAMES)].to_numpy() if len(test) else np.empty((0, len(FEATURE_NAMES)))
-    y_test = test["yield_tha"].to_numpy()
+
+    # Original-scale targets — used for metrics + payload flag-driven
+    # log inversion. The `y_*_fit` variants are what the models actually
+    # learn from; identical to `y_*_orig` for non-log-target crops.
+    y_train_orig = train["yield_tha"].to_numpy()
+    y_val_orig = val["yield_tha"].to_numpy()
+    y_test_orig = test["yield_tha"].to_numpy()
+    log_target = crop in LOG_TARGET_CROPS
+    if log_target:
+        log.info("[%s] applying log1p target transform (LOG_TARGET_CROPS)", crop)
+        y_train = np.log1p(y_train_orig)
+        y_val = np.log1p(y_val_orig)
+        y_test = np.log1p(y_test_orig)
+    else:
+        y_train = y_train_orig
+        y_val = y_val_orig
+        y_test = y_test_orig
 
     X_trainval = np.vstack([X_train, X_val]) if len(X_val) else X_train
     y_trainval = np.concatenate([y_train, y_val]) if len(y_val) else y_train
 
     out: dict[str, Any] = {"skipped": False, "n_train": len(train),
                           "n_val": len(val), "n_test": len(test),
+                          "log_target": log_target,
                           "families": {}}
+
+    # Helper to build the payload header consistently across families
+    # — every payload now carries `log_target` so the predict path
+    # (`app/ml/yield_model.py`) and conformal calibrator know when to
+    # apply `np.expm1` to the raw model output.
+    def _eval_set(model, *, point: bool = False) -> dict:
+        return {
+            "train": _eval_helper(model, X_train, y_train_orig, log_target=log_target),
+            "val": _eval_helper(model, X_val, y_val_orig, log_target=log_target),
+            "test": _eval_helper(model, X_test, y_test_orig, log_target=log_target),
+        }
 
     for family in families:
         log.info("[%s] training %s…", crop, family)
         try:
             if family == "rf":
-                model = _train_rf(X_train, y_train)
+                model = _train_rf(X_train, y_train, crop=crop)
                 meta_payload = {"model": model, "features": list(FEATURE_NAMES),
-                                "family": "rf", "version": "v3"}
+                                "family": "rf", "version": "v3",
+                                "log_target": log_target}
                 _save_payload(meta_payload, family, crop)
-                metrics = {
-                    "train": _eval_helper(model, X_train, y_train),
-                    "val": _eval_helper(model, X_val, y_val),
-                    "test": _eval_helper(model, X_test, y_test),
-                }
+                metrics = _eval_set(model)
 
             elif family == "xgboost":
-                bundle = _train_xgboost(X_train, y_train, X_val, y_val)
+                bundle = _train_xgboost(X_train, y_train, X_val, y_val, crop=crop)
                 meta_payload = {"point": bundle["point"], "q_low": bundle["q_low"],
                                 "q_high": bundle["q_high"],
                                 "features": list(FEATURE_NAMES),
-                                "family": "xgboost", "version": "v3"}
+                                "family": "xgboost", "version": "v3",
+                                "log_target": log_target}
                 _save_payload(meta_payload, family, crop)
-                point = bundle["point"]
-                metrics = {
-                    "train": _eval_helper(point, X_train, y_train),
-                    "val": _eval_helper(point, X_val, y_val),
-                    "test": _eval_helper(point, X_test, y_test),
-                }
+                metrics = _eval_set(bundle["point"])
 
             elif family == "lightgbm":
-                model = _train_lightgbm(X_train, y_train, X_val, y_val)
+                model = _train_lightgbm(X_train, y_train, X_val, y_val, crop=crop)
                 meta_payload = {"model": model, "features": list(FEATURE_NAMES),
-                                "family": "lightgbm", "version": "v3"}
+                                "family": "lightgbm", "version": "v3",
+                                "log_target": log_target}
                 _save_payload(meta_payload, family, crop)
-                metrics = {
-                    "train": _eval_helper(model, X_train, y_train),
-                    "val": _eval_helper(model, X_val, y_val),
-                    "test": _eval_helper(model, X_test, y_test),
-                }
+                metrics = _eval_set(model)
 
             elif family == "stack":
-                stack = _train_stack(X_trainval, y_trainval)
+                stack = _train_stack(X_trainval, y_trainval, crop=crop)
                 meta_payload = {"model": stack, "features": list(FEATURE_NAMES),
-                                "family": "stack", "version": "v3"}
+                                "family": "stack", "version": "v3",
+                                "log_target": log_target}
                 _save_payload(meta_payload, family, crop)
-                metrics = {
-                    "train": _eval_helper(stack, X_train, y_train),
-                    "val": _eval_helper(stack, X_val, y_val),
-                    "test": _eval_helper(stack, X_test, y_test),
-                }
+                metrics = _eval_set(stack)
             else:
                 log.warning("Unknown family %s — skipping.", family)
                 continue

@@ -82,7 +82,6 @@ const uk = {
       weather: "Погода",
       chat: "AI-помічник",
       reports: "Звіти",
-      methodology: "Методологія",
       settings: "Налаштування",
     },
     dashboard: {
@@ -252,6 +251,30 @@ const uk = {
         drought_dryspells: "Дні без опадів",
         centroid_lat: "Широта",
         centroid_lon: "Довгота",
+        // SoilGrids (v7 extension)
+        bdod: "Щільність ґрунту",
+        cec: "Ємність обміну катіонів",
+        clay: "Вміст глини, %",
+        phh2o: "pH ґрунту",
+        sand: "Вміст піску, %",
+        silt: "Вміст мулу, %",
+        soc: "Орг. вуглець ґрунту",
+        // Crop-specific weather features (v5)
+        crop_season_overlap_aprjul: "Перекриття сезону Кв-Лип",
+        gdd_proxy: "Активні температури (GDD)",
+        precip_crop_weighted: "Опади (зважено за сезоном)",
+        heat_stress_crop_weighted: "Спека (зважено за фенофазою)",
+        drought_crop_weighted: "Посуха (зважено за сезоном)",
+        growing_season_length_months: "Тривалість сезону",
+        // Post-phenology-audit additions — crop-aligned NDVI signals.
+        ndvi_at_crop_peak_month: "NDVI на піку культури",
+        ndvi_peak_timing_offset_weeks: "Зсув піку NDVI, тиж.",
+        // Agroclimatic zone one-hot features (regional-baseline lift).
+        zone_polissia: "Зона: Полісся",
+        zone_forest_steppe: "Зона: Лісостеп",
+        zone_steppe_north: "Зона: Північний степ",
+        zone_steppe_south: "Зона: Південний степ",
+        zone_transcarpathia: "Зона: Закарпаття",
       },
     },
     alertsUi: {

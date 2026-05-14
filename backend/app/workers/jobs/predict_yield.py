@@ -30,6 +30,7 @@ from app.redis_clients import get_sync_redis
 from app.services.dashboard_analytics import (
     find_oblast_for_centroid,
     oblast_avg_ndvi,
+    oblast_avg_yield,
 )
 from app.workers.pubsub import publish_progress
 
@@ -83,6 +84,11 @@ def predict_field_yield(field_id: int) -> dict:
                 features_json={k: v for k, v in result.features.items()},
                 shap_top_json=result.shap_top,
                 summary_text=result.summary_text,
+                # Phase-C empirical-Bayes shrinkage diagnostics. Stored as
+                # 0.0 when the model is strong (R²≥1) so historical rows
+                # backfill cleanly post-migration with a no-op default.
+                shrinkage_weight=getattr(result, "shrinkage_weight", 0.0),
+                raw_ml_value_tha=getattr(result, "raw_ml_value_tha", None),
             )
             s.add(pred)
             s.commit()
@@ -126,6 +132,7 @@ def _try_generate_summary(field: Field, result, crop: CropType) -> str | None:
             pass
 
         oblast_baseline: float | None = None
+        oblast_yield_tha: float | None = None
         if centroid_lat is not None and centroid_lon is not None:
             oblast_name = find_oblast_for_centroid(centroid_lat, centroid_lon)
             if oblast_name:
@@ -133,11 +140,20 @@ def _try_generate_summary(field: Field, result, crop: CropType) -> str | None:
                 # risk-score uses to compare a field to its oblast.
                 # Year argument: use latest available (None → most recent).
                 oblast_baseline = oblast_avg_ndvi(oblast_name, None)
+                # Держстат yield baseline is the user-facing comparison
+                # anchor — same one the OblastComparisonTable uses. When
+                # the prediction diverges from this by > 20 %, the LLM
+                # explicitly addresses the gap in its narrative so the
+                # user sees one coherent story instead of having to
+                # reconcile the SHAP factors with the comparison table.
+                yield_avg, _ = oblast_avg_yield(oblast_name, crop.value, None)
+                oblast_yield_tha = yield_avg
 
         return asyncio.run(generate_explanation_via_llm(
             crop=crop.value,
             value_tha=result.value_tha,
             oblast_baseline=oblast_baseline,
+            oblast_yield_tha=oblast_yield_tha,
             q_low=result.value_tha_q05,
             q_high=result.value_tha_q95,
             top_shap=result.shap_top,

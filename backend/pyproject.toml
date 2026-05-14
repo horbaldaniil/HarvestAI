@@ -81,6 +81,13 @@ dev = [
     "ipython>=8.29.0",
     "jupyter>=1.1.1",
     "fakeredis>=2.35.1",
+    # Optuna powers `scripts/optuna_tune_v7.py` — per-(crop, family)
+    # hyperparameter sweep for the 5 weakest crops (oats, buckwheat, rye,
+    # sugar_beet, peas). Kept in dev because hyperparameter search is a
+    # one-shot research activity, not a production inference dep — the
+    # tuned params get baked into `optuna_best_params_v7.json` which the
+    # trainers consume at fit time without re-running Optuna.
+    "optuna>=4.0.0",
 ]
 
 [build-system]

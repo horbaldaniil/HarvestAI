@@ -50,6 +50,19 @@ class Prediction(Base, TimestampMixin):
     # predict-yield worker. NULL when OPENAI_API_KEY is not configured
     # or the LLM call failed — UI hides the summary block in that case.
     summary_text: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    # Phase-C empirical-Bayes shrinkage diagnostics.
+    #   shrinkage_weight ∈ [0, 1]: share of `value_tha` sourced from the
+    #     regional Держстат baseline. 0 = trusted-ML, 1 = full fallback.
+    #   raw_ml_value_tha: pre-shrinkage point estimate, useful for the
+    #     "model said X, shrunk to Y" UI diagnostic and for post-hoc
+    #     re-shrinking without re-running the model.
+    # Both NULL on pre-migration rows; UI gracefully hides the badge.
+    shrinkage_weight: Mapped[float | None] = mapped_column(
+        Numeric(5, 3), nullable=True,
+    )
+    raw_ml_value_tha: Mapped[float | None] = mapped_column(
+        Numeric(6, 3), nullable=True,
+    )
     predicted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

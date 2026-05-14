@@ -73,48 +73,153 @@ CROP_PROFILE: dict[str, dict[str, Any]] = {
 
 @dataclass(frozen=True, slots=True)
 class WeatherStats:
+    """Per-(oblast, yield-year) weather aggregates fed into the parquet.
+
+    The first 4 fields are the legacy v3-era Apr-Jul aggregates. The
+    Phase-A round-3 extensions (Oct 2025) add 3 fields for previously
+    blind spots:
+
+    - `sm_jun_jul_mean`: soil moisture 0-10 cm averaged across June +
+      July daily readings. Open-Meteo's `soil_moisture_0_to_10cm_mean`
+      drives tuber-bulking for potato + sugar_beet — we had the data
+      but never aggregated it.
+    - `sm_drydown_days`: count of Jun-Aug days with soil moisture
+      below 0.15 m³/m³ (drought-stress threshold per FAO 56).
+    - `winter_kill_days`: count of days with `temperature_2m_min <
+      -15°C` in Dec(yield_year - 1) and Jan/Feb(yield_year). Captures
+      winter-crop survival risk for wheat/barley/rye/rapeseed.
+
+    All three default to 0 when Open-Meteo doesn't return data for
+    the requested window (rate-limited / outside coverage).
+    """
     precip_sum_apr_jul: float
     temp_mean_apr_jul: float
     heat_stress_days: int
     drought_dryspells: int
+    # Phase-A round-3 additions (Oct 2025) — see docstring above.
+    sm_jun_jul_mean: float = 0.0
+    sm_drydown_days: int = 0
+    winter_kill_days: int = 0
 
 
 # ────── Weather fetch ───────────────────────────────────────────
 
 
-async def fetch_weather_for_rows(rows: list[dict]) -> dict[tuple[float, float, int], WeatherStats]:
-    """Open-Meteo historical for each unique (lat, lon, year). Returns lookup map."""
+async def fetch_weather_for_rows(
+    rows: list[dict],
+) -> tuple[
+    dict[tuple[float, float, int], WeatherStats],
+    dict[tuple[float, float, int], list],
+]:
+    """Open-Meteo historical for each unique (lat, lon, yield_year).
+    Returns **two** lookup maps keyed by (lat, lon, yield_year):
+
+    1. `stats_map[key] = WeatherStats` — the legacy + Phase-A round-3
+       aggregates (Apr-Jul + soil-moisture + winter-kill).
+    2. `daily_map[key] = list[DailyWeather]` — the raw daily rows the
+       aggregates were computed from. Used downstream by
+       `app.ml.features._bbch_phase_weather` to compute crop-specific
+       BBCH-phase weather features that need the original daily data
+       (which can't be reconstructed from aggregates alone).
+
+    Returning both in one call avoids double-fetching Open-Meteo.
+    Memory cost: ~300 KB per (lat, lon, year) at most (305 daily rows
+    × ~1 KB each); fits comfortably for the ~1500 keys we handle.
+
+    Fetch window: **Dec 1 of (year-1) → Sep 30 of year**. Spans the
+    full cropping cycle:
+      - Dec(N-1)..Feb(N): winter survival (drives `winter_kill_days`)
+      - Apr(N)..Jul(N):   reference growing window (drives legacy
+                          Apr-Jul aggregates — unchanged for back-compat)
+      - Jun(N)..Aug(N):   tuber-bulking (drives soil-moisture features)
+
+    Open-Meteo's ERA5 archive accepts year-spanning ranges in a single
+    call, so this adds zero round-trips vs the legacy Apr-Jul-only
+    fetch — just a wider date range per call.
+    """
     keys = {(r["centroid_lat"], r["centroid_lon"], r["year"]) for r in rows}
     client = OpenMeteoClient()
     out: dict[tuple[float, float, int], WeatherStats] = {}
+    daily_out: dict[tuple[float, float, int], list] = {}
     try:
         for i, (lat, lon, year) in enumerate(sorted(keys), 1):
-            start = date(year, 4, 1)
-            end = date(year, 7, 31)
+            # Span Dec(year-1) → Sep(year): captures winter survival
+            # AND the full growing season in one Open-Meteo call.
+            start = date(year - 1, 12, 1)
+            end = date(year, 9, 30)
             try:
                 daily = await client.fetch_historical(lat, lon, start, end)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Open-Meteo failed for (%.2f, %.2f, %d): %s",
                             lat, lon, year, exc)
-                out[(lat, lon, year)] = WeatherStats(0.0, 0.0, 0, 0)
+                out[(lat, lon, year)] = WeatherStats(0.0, 0.0, 0, 0, 0.0, 0, 0)
+                daily_out[(lat, lon, year)] = []
                 continue
+            daily_out[(lat, lon, year)] = daily
 
-            precip = sum(d.precip_mm for d in daily if d.precip_mm is not None)
-            temps = [d.temp_mean_c for d in daily if d.temp_mean_c is not None]
+            # Legacy Apr-Jul aggregates (unchanged) — filter to Apr-Jul
+            # of the yield-year so back-compat consumers see identical
+            # values to the pre-Phase-A baseline.
+            apr_jul = [
+                d for d in daily
+                if d.observed_on is not None
+                and d.observed_on.year == year
+                and 4 <= d.observed_on.month <= 7
+            ]
+            precip = sum(d.precip_mm for d in apr_jul if d.precip_mm is not None)
+            temps = [d.temp_mean_c for d in apr_jul if d.temp_mean_c is not None]
             t_mean = float(np.mean(temps)) if temps else 0.0
-            heat = sum(1 for d in daily if (d.temp_max_c or 0) > 30)
-            dry = _max_consecutive_dry_days(daily)
+            heat = sum(1 for d in apr_jul if (d.temp_max_c or 0) > 30)
+            dry = _max_consecutive_dry_days(apr_jul)
+
+            # Phase-A: soil-moisture features over Jun-Aug of yield-year.
+            jun_aug = [
+                d for d in daily
+                if d.observed_on is not None
+                and d.observed_on.year == year
+                and 6 <= d.observed_on.month <= 8
+            ]
+            sm_jun_jul = [
+                d.soil_moisture_0_10cm for d in jun_aug
+                if d.observed_on.month in (6, 7)
+                and d.soil_moisture_0_10cm is not None
+            ]
+            sm_jun_jul_mean = float(np.mean(sm_jun_jul)) if sm_jun_jul else 0.0
+            sm_drydown_days = sum(
+                1 for d in jun_aug
+                if (d.soil_moisture_0_10cm or 1.0) < 0.15
+            )
+
+            # Phase-A: winter-kill — Dec(year-1) + Jan/Feb(year) days
+            # with T_min below -15°C. Threshold from Larcher (2003)
+            # cold-tolerance review for winter cereals.
+            winter = [
+                d for d in daily
+                if d.observed_on is not None
+                and (
+                    (d.observed_on.year == year - 1 and d.observed_on.month == 12)
+                    or (d.observed_on.year == year and d.observed_on.month in (1, 2))
+                )
+            ]
+            winter_kill = sum(
+                1 for d in winter
+                if (d.temp_min_c is not None) and (d.temp_min_c < -15.0)
+            )
+
             out[(lat, lon, year)] = WeatherStats(
                 precip_sum_apr_jul=round(precip, 1),
                 temp_mean_apr_jul=round(t_mean, 2),
                 heat_stress_days=heat,
                 drought_dryspells=dry,
+                sm_jun_jul_mean=round(sm_jun_jul_mean, 3),
+                sm_drydown_days=sm_drydown_days,
+                winter_kill_days=winter_kill,
             )
             if i % 25 == 0:
                 log.info("Open-Meteo: fetched %d/%d", i, len(keys))
     finally:
         await client.aclose()
-    return out
+    return out, daily_out
 
 
 def _max_consecutive_dry_days(daily) -> int:
@@ -323,7 +428,7 @@ def main() -> int:
     log.info("Loaded %d yield rows", len(rows))
 
     log.info("Fetching Open-Meteo historical (this takes a minute)...")
-    weather = asyncio.run(fetch_weather_for_rows(rows))
+    weather, _daily = asyncio.run(fetch_weather_for_rows(rows))
     log.info("Got weather for %d (lat,lon,year) combos", len(weather))
 
     log.info("Building feature dataset (synthesising NDVI features)...")

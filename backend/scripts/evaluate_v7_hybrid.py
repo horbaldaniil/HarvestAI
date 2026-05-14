@@ -58,6 +58,18 @@ ROOT = Path(__file__).resolve().parents[1]
 METRICS_V6 = ROOT / "data" / "processed" / "model_metrics_v6.json"
 METRICS_V7 = ROOT / "data" / "processed" / "model_metrics_v7.json"
 METRICS_V7H = ROOT / "data" / "processed" / "model_metrics_v7h.json"
+# Phase-B: multi-task v8 metrics (single model per family across all 13
+# crops). Optional — falls back gracefully when the file is missing
+# (v8 trainer not yet run, or v8 was rolled back by removing .joblibs).
+METRICS_V8 = ROOT / "data" / "processed" / "model_metrics_v8.json"
+# Phase-C: multi-task hierarchical v8h metrics. Same shape as v8 (per-
+# crop split metrics) and same one-file-per-family on-disk layout. Read
+# alongside v8 so the best-of-N picker covers {v6, v7, v7h, v8, v8h}.
+METRICS_V8H = ROOT / "data" / "processed" / "model_metrics_v8h.json"
+# Phase-D Option A: per-crop SHAP-pruned v7 metrics. Same per-crop +
+# per-family shape as v7. Read alongside the rest so the picker
+# considers v7p as a 6th candidate.
+METRICS_V7P = ROOT / "data" / "processed" / "model_metrics_v7p.json"
 OUT = ROOT / "data" / "processed" / "evaluation_v7_hybrid.json"
 
 
@@ -97,21 +109,30 @@ def main() -> int:
     v6 = _load(METRICS_V6)
     v7 = _load(METRICS_V7)
     v7h = _load(METRICS_V7H)
+    v7p = _load(METRICS_V7P)
+    v8 = _load(METRICS_V8)
+    v8h = _load(METRICS_V8H)
 
-    if not (v6 or v7 or v7h):
-        log.error("No metrics files found — train v6/v7/v7h models first.")
+    if not (v6 or v7 or v7h or v7p or v8 or v8h):
+        log.error("No metrics files found — train v6/v7/v7h/v7p/v8/v8h models first.")
         return 1
 
     all_crops = sorted(
-        set(v6.get("crops", {})) | set(v7.get("crops", {})) | set(v7h.get("crops", {}))
+        set(v6.get("crops", {}))
+        | set(v7.get("crops", {}))
+        | set(v7h.get("crops", {}))
+        | set(v7p.get("crops", {}))
+        | set(v8.get("crops", {}))
+        | set(v8h.get("crops", {}))
     )
-    log.info("Comparing %d crops across v6, v7, v7h …", len(all_crops))
+    log.info("Comparing %d crops across v6, v7, v7h, v7p, v8, v8h …",
+             len(all_crops))
 
     summary: dict[str, Any] = {
         "metadata": {
             "evaluated_at": datetime.now(UTC).isoformat(),
-            "kind": "hybrid_best_of_v6_v7_v7h",
-            "candidates": ["v6", "v7", "v7h"],
+            "kind": "hybrid_best_of_v6_v7_v7h_v7p_v8_v8h",
+            "candidates": ["v6", "v7", "v7h", "v7p", "v8", "v8h"],
             "selection_metric": "test_r2",
             "split": "train=2018-2019 / val=2020 / test=2021 (real-only Держстат)",
         },
@@ -120,7 +141,16 @@ def main() -> int:
 
     for crop in all_crops:
         candidates: dict[str, dict] = {}
-        for ver_name, ver_data in (("v6", v6), ("v7", v7), ("v7h", v7h)):
+        # Phase-B: v8 (4th candidate). Phase-C: v8h (5th).
+        # Phase-D Option A: v7p (6th) — SHAP-pruned per-crop feature
+        # subset to claw back regressions caused by Phase A's wider
+        # feature schema on crops with low n_train. All "multi-task"
+        # and "pruned" variants are rolled back automatically when
+        # their test R² fails to beat the per-crop alternatives.
+        for ver_name, ver_data in (
+            ("v6", v6), ("v7", v7), ("v7h", v7h), ("v7p", v7p),
+            ("v8", v8), ("v8h", v8h),
+        ):
             crop_block = ver_data.get("crops", {}).get(crop)
             if crop_block is None:
                 continue
