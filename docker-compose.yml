@@ -1,6 +1,13 @@
 services:
   db:
-    image: postgis/postgis:16-3.4
+    # Community multi-arch fork of postgis/postgis:16-3.4. Supports both
+    # linux/amd64 (Intel Mac, Windows, most Linux) AND linux/arm64
+    # (Apple Silicon M1/M2/M3/M4, Raspberry Pi). API-compatible drop-in —
+    # PostGIS 3.4 on PostgreSQL 16, same extensions, same migration path
+    # for Alembic. Switched from postgis/postgis:16-3.4 because the
+    # official image lacks an arm64 manifest, breaking docker compose up
+    # on Apple Silicon hosts with a "no matching manifest" error.
+    image: imresamu/postgis:16-3.4
     container_name: harvestai-db
     environment:
       POSTGRES_USER: harvestai
