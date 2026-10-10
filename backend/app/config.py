@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     sh_client_secret: str = ""
     sh_instance_id: str = ""
     sh_monthly_pu_limit: int = 900
+    # Copernicus Data Space Ecosystem
+    sh_oauth_url: str = (
+        "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+    )
+    sh_api_url: str = "https://sh.dataspace.copernicus.eu"
 
     # ─── OpenAI ─────────────────────────────────────────────────
     openai_api_key: str = ""

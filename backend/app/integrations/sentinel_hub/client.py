@@ -30,9 +30,9 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
-OAUTH_URL = "https://services.sentinel-hub.com/auth/realms/main/protocol/openid-connect/token"
-STATISTICAL_URL = "https://services.sentinel-hub.com/api/v1/statistics"
-PROCESS_URL = "https://services.sentinel-hub.com/api/v1/process"
+OAUTH_URL = settings.sh_oauth_url
+STATISTICAL_URL = f"{settings.sh_api_url.rstrip('/')}/api/v1/statistics"
+PROCESS_URL = f"{settings.sh_api_url.rstrip('/')}/api/v1/process"
 TOKEN_REDIS_KEY = "sh:oauth_token"
 TOKEN_TTL_SECONDS = 55 * 60  # access tokens live 1h; refresh 5min before expiry
 
