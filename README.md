@@ -92,6 +92,19 @@ cd backend
 rq worker default high low
 ```
 
+#### PyTorch: Windows (GPU) і macOS
+
+`uv sync` сам ставить потрібну збірку PyTorch з одного `uv.lock`:
+- **Windows** — збірка з CUDA 12.8 (потрібна для RTX 50xx / Blackwell); навчання моделей.
+- **macOS (Apple Silicon)** — звичайна збірка з PyPI, обчислення на MPS або CPU; лише інференс.
+
+Пристрій обирається автоматично (CUDA → MPS → CPU); примусово — змінною
+`HARVESTAI_DEVICE=cpu|mps|cuda`. Перевірка середовища:
+```bash
+cd backend
+uv run python scripts/thesis/check_env.py
+```
+
 ### 4. Frontend
 ```bash
 cd frontend

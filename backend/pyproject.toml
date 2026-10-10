@@ -43,14 +43,18 @@ dependencies = [
     # and the three remaining boosters cover the same model diversity.
     "lightgbm>=4.5.0",
     "pyyaml>=6.0",  # build_yield_csv reads Держстат yield YAML
+    "xlrd>=2.0.1",  # derzhstat_ingest reads Держстат .xls bulletins
     "rasterio>=1.4.2",
     "shapely>=2.0.6",
     "geopandas>=1.0.1",  # Week 6: cropland-mask geom operations
     "pyarrow>=18.0.0",  # Week 6: parquet for oblast_s2_observations
     "joblib>=1.4.2",
-    # Torch (CPU-only). LSTM yield model for the magistr methods chapter.
-    # Pinned to CPU build to avoid bundling 2+ GB of CUDA on Windows dev boxes.
+    # Torch: CUDA 12.8 build on Windows (RTX 5070 Ti / Blackwell needs cu128+),
+    # PyPI build elsewhere (macOS → MPS/CPU, Linux Docker). See [tool.uv.sources].
     "torch>=2.2.0",
+    # ─── Thesis: field boundary segmentation ─────────
+    "scikit-image>=0.24.0",  # watershed for splitting touching fields
+    "tensorboard>=2.18.0",  # training curves
     # ─── External APIs ───────────────────────────────
     "openai>=1.54.0",
     "httpx>=0.27.2",
@@ -93,6 +97,14 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
