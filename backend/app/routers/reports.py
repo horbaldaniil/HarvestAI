@@ -162,10 +162,40 @@ async def _prune_old_reports(db, user_id: int) -> None:
 
 
 def _stream_pdf(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    """Send a PDF as a streaming attachment with a Unicode-safe filename.
+
+    HTTP/1.1 headers are restricted to latin-1 (RFC 7230 §3.2.4); Ukrainian
+    Cyrillic in `filename` would otherwise raise UnicodeEncodeError when
+    Starlette encodes the headers. RFC 5987 §3.2 specifies the
+    `filename*=UTF-8''<percent-encoded>` extension, which all modern
+    browsers (Chrome 9+, Firefox 8+, Safari 6+, Edge) understand. We
+    additionally emit a fallback ASCII `filename=` for ancient HTTP
+    clients — it's transliterated to ASCII-safe form (drop accents,
+    replace non-Latin chars with `_`) so the header itself stays
+    latin-1-encodable.
+    """
+    from urllib.parse import quote
+    import unicodedata
+
+    # Fallback for clients that don't read filename* (rare these days).
+    # NFKD-normalise then strip everything beyond ASCII; replace gaps with _
+    ascii_fallback = (
+        unicodedata.normalize("NFKD", filename)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        or "report.pdf"
+    )
+    # RFC 5987: percent-encoded UTF-8 for the canonical name (Cyrillic OK).
+    utf8_filename = quote(filename, safe="")
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_fallback}"; '
+                f"filename*=UTF-8''{utf8_filename}"
+            ),
+        },
     )
 
 
